@@ -1,5 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { typeSafeBaseUrl, typeSafeModel } from "../typesafe-core.mjs";
+import { jevBudget, requestTypeSafe, typeSafeBaseUrl, typeSafeModel } from "../typesafe-core.mjs";
 
 type Role = "user" | "assistant";
 
@@ -27,6 +27,7 @@ type InternalMessage = {
 type Transcript = {
 	messages: InternalMessage[];
 	oldCount: number;
+	previousSummary?: string;
 };
 
 type ToolCandidate = {
@@ -98,16 +99,21 @@ type Success = {
 type Fallback = {
 	ok: false;
 	fallback: string;
+	// 没有失败但也没有可做的事：整段历史都在保留窗口内，或用户主动取消。
+	// 界面按说明展示，不报"回退"。
+	notice?: "empty" | "cancelled";
 };
 
 type StateFit = {
 	text: string;
 	tokens: number;
 	stage: string;
+	// 状态里逐条渲染的调用；缺省表示状态覆盖了全部候选。
+	callIds?: ReadonlySet<string>;
 };
 
 type ResultFitMode = "normal" | "head" | "minimal";
-type SummaryFitMode = ResultFitMode | "compact" | "skeleton" | "outline";
+type SummaryFitMode = ResultFitMode | "compact" | "skeleton" | "outline" | "bounded";
 
 type JevResponse = {
 	model?: string;
@@ -115,13 +121,22 @@ type JevResponse = {
 	usage?: { input_tokens?: number; output_tokens?: number };
 };
 
-const DEFAULT_STATE_TOKENS = 20_000;
-const DEFAULT_REQUEST_TOKENS = 30_000;
+const MAX_CONCURRENT_REQUESTS = 4;
 const DEFAULT_SUMMARY_TOKENS = 16_000;
+// 摘要预算按窗口份额算，再用绝对上限拦住大窗口（如 1M 窗口给出 40 万 Token 的常驻摘要）。
+const DEFAULT_SUMMARY_SHARE = 0.4;
+const DEFAULT_SUMMARY_CAP_TOKENS = 120_000;
+// 受保护写操作在预算紧张的档位仍保留入参开头，供识别改了什么。
+const PROTECTED_INPUT_HEAD_CHARS = 1_000;
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_TRUNCATE_HEAD_CHARS = 300;
 const DEFAULT_MIN_REDUCTION = 0.25;
 const REQUEST_OVERHEAD_TOKENS = 64;
+// 最后一级状态是有界的：旧窗口里逐条渲染的调用数封顶，超出的调用不进状态、不提问，
+// 按保留处理（摘要侧仍按自己的预算裁剪），避免整个压缩退化成主模型摘要。
+const MAX_STATE_OLD_CALLS = 200;
+// 摘要最后一档只逐条展开最近这么多条旧消息，更早的只保留计数。
+const MAX_SUMMARY_OLD_MESSAGES = 200;
 const SUMMARY_HEADER =
 	"<typesafe-jev-compaction>\n" +
 	"Earlier history is preserved as a deterministic transcript. Jev removed or truncated stale tool calls/results; when the summary budget requires it, older non-error narrative is abridged. User goals, protected failures, protected writes, and kept content remain represented.\n" +
@@ -267,44 +282,50 @@ function messageFromEntry(entry: SessionEntry): InternalMessage | undefined {
 	return undefined;
 }
 
-function convertBranch(branchEntries: readonly SessionEntry[], firstKeptEntryId: string): Transcript | undefined {
-	const keptIndex = branchEntries.findIndex((entry) => entry.id === firstKeptEntryId);
+function messageFromAgentMessage(raw: unknown): InternalMessage | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	return messageFromEntry({ type: "message", message: raw } as unknown as SessionEntry);
+}
+
+type CompactionPreparationInput = {
+	firstKeptEntryId: string;
+	messagesToSummarize: readonly unknown[];
+	turnPrefixMessages: readonly unknown[];
+	previousSummary?: string;
+	tokensBefore: number;
+	fileOps: unknown;
+};
+
+function convertPreparation(
+	branchEntries: readonly SessionEntry[],
+	preparation: CompactionPreparationInput,
+): Transcript | undefined {
+	const keptIndex = branchEntries.findIndex((entry) => entry.id === preparation.firstKeptEntryId);
 	if (keptIndex < 0) return undefined;
-	const messages: InternalMessage[] = [];
-	let oldCount = 0;
-	for (let index = 0; index < branchEntries.length; index += 1) {
+
+	const oldMessages: InternalMessage[] = [];
+	for (const raw of [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]) {
+		const message = messageFromAgentMessage(raw);
+		if (!message) continue;
+		if (!message.text && !message.thinking && message.toolUses.length === 0 && message.toolResults.length === 0) continue;
+		oldMessages.push(message);
+	}
+
+	const keptMessages: InternalMessage[] = [];
+	for (let index = keptIndex; index < branchEntries.length; index += 1) {
 		const entry = branchEntries[index];
-		if (!entry) continue;
+		if (!entry || entry.type === "compaction") continue;
 		const message = messageFromEntry(entry);
 		if (!message) continue;
 		if (!message.text && !message.thinking && message.toolUses.length === 0 && message.toolResults.length === 0) continue;
-		messages.push(message);
-		if (index < keptIndex) oldCount += 1;
+		keptMessages.push(message);
 	}
-	return { messages, oldCount };
-}
 
-function compactedContextEntries(branchEntries: readonly SessionEntry[]): SessionEntry[] {
-	const path = [...branchEntries];
-	let compactionIndex = -1;
-	for (let index = path.length - 1; index >= 0; index -= 1) {
-		if (path[index]?.type === "compaction") {
-			compactionIndex = index;
-			break;
-		}
-	}
-	if (compactionIndex < 0) return path;
-
-	const compaction = path[compactionIndex] as SessionEntry & { firstKeptEntryId?: string };
-	const firstKeptIndex = typeof compaction.firstKeptEntryId === "string"
-		? path.findIndex((entry) => entry.id === compaction.firstKeptEntryId)
-		: -1;
-	const contextEntries: SessionEntry[] = [compaction];
-	if (firstKeptIndex >= 0 && firstKeptIndex < compactionIndex) {
-		contextEntries.push(...path.slice(firstKeptIndex, compactionIndex));
-	}
-	contextEntries.push(...path.slice(compactionIndex + 1));
-	return contextEntries;
+	return {
+		messages: [...oldMessages, ...keptMessages],
+		oldCount: oldMessages.length,
+		previousSummary: preparation.previousSummary,
+	};
 }
 
 function isWriteLikeTool(tool: string): boolean {
@@ -348,7 +369,9 @@ function collectCalls(transcript: Transcript): ToolCandidate[] {
 
 const TOKEN_PIECES = /[A-Za-z]+|\d+|[^\sA-Za-z\d]/g;
 
-function estimateTokens(text: string): number {
+// Unrounded token weight. Token pieces never span whitespace, so the weight of a
+// joined text equals the sum of its chunks and can be accumulated while building.
+function tokenCount(text: string): number {
 	let tokens = 0;
 	for (const match of text.matchAll(TOKEN_PIECES)) {
 		const piece = match[0];
@@ -357,7 +380,30 @@ function estimateTokens(text: string): number {
 		else if ((first >= 65 && first <= 90) || (first >= 97 && first <= 122)) tokens += 1 + Math.floor((piece.length - 1) / 6);
 		else tokens += 0.9;
 	}
-	return Math.ceil(tokens);
+	return tokens;
+}
+
+export function estimateTokens(text: string): number {
+	return Math.ceil(tokenCount(text));
+}
+
+// 状态与问题都以 JSON 转义后的形态进入请求体：换行和引号会多占字符，转义符还会切断
+// 字母片段。预算按请求体形态计量，否则拟合出的状态会比上限大出约四成。
+const JSON_NEWLINE_TOKENS = tokenCount("\\n");
+
+function bodyTokenCount(text: string): number {
+	return tokenCount(JSON.stringify(text).slice(1, -1));
+}
+
+type FittedText = {
+	text: string;
+	tokens: number;
+};
+
+function abridge(text: string, head: number, tail: number): string {
+	if (text.length <= head + tail + 40) return text;
+	const suffix = tail > 0 ? `\n${text.slice(-tail)}` : "";
+	return `${text.slice(0, head)}\n[… ${text.length - head - tail} chars omitted …]${suffix}`;
 }
 
 function resultText(result: ToolResult, mode: "full" | "head4000" | "head1000" | "meta"): string {
@@ -368,8 +414,13 @@ function resultText(result: ToolResult, mode: "full" | "head4000" | "head1000" |
 	return `${result.text.slice(0, limit)}\n[${result.text.length - limit} chars omitted for Jev state]`;
 }
 
-function stateText(messages: readonly InternalMessage[], mode: "full" | "head4000" | "head1000" | "meta"): string {
+function stateText(
+	messages: readonly InternalMessage[],
+	mode: "full" | "head4000" | "head1000" | "meta",
+	tokenLimit: number,
+): FittedText | undefined {
 	const chunks: string[] = [];
+	let tokens = 0;
 	for (const message of messages) {
 		const parts: string[] = [];
 		if (message.role === "user" && message.text) parts.push(`[User]\n${message.text}`);
@@ -381,24 +432,50 @@ function stateText(messages: readonly InternalMessage[], mode: "full" | "head400
 		for (const result of message.toolResults) {
 			parts.push(`[Tool result ${result.toolName}${result.isError ? ", error" : ""}]\n${resultText(result, mode)}`);
 		}
-		if (parts.length > 0) chunks.push(parts.join("\n\n"));
+		if (parts.length === 0) continue;
+		const chunk = parts.join("\n\n");
+		tokens += bodyTokenCount(chunk) + (chunks.length > 0 ? JSON_NEWLINE_TOKENS * 2 : 0);
+		// This stage already exceeds the budget, so the rest of the oversized text is
+		// neither built nor scanned.
+		if (tokens > tokenLimit) return undefined;
+		chunks.push(chunk);
 	}
-	return chunks.join("\n\n");
+	return { text: chunks.join("\n\n"), tokens: Math.ceil(tokens) };
 }
 
-function abridge(text: string, head: number, tail: number): string {
-	if (text.length <= head + tail + 40) return text;
-	const suffix = tail > 0 ? `\n${text.slice(-tail)}` : "";
-	return `${text.slice(0, head)}\n[… ${text.length - head - tail} chars omitted …]${suffix}`;
-}
-
-function compactStateText(messages: readonly InternalMessage[], oldCount: number, minimal: boolean): string {
+function compactStateText(
+	messages: readonly InternalMessage[],
+	oldCount: number,
+	minimal: boolean,
+	tokenLimit: number,
+	bounded = false,
+): (FittedText & { callIds?: ReadonlySet<string> }) | undefined {
 	const chunks: string[] = [];
+	let tokens = 0;
+	const push = (chunk: string): boolean => {
+		tokens += bodyTokenCount(chunk) + (chunks.length > 0 ? JSON_NEWLINE_TOKENS * 2 : 0);
+		if (tokens > tokenLimit) return false;
+		chunks.push(chunk);
+		return true;
+	};
+	// 有界模式先锁定要逐条渲染的旧调用，超出的部分不进状态，由调用方按保留处理。
+	let rendered: ReadonlySet<string> | undefined;
+	let omitted = 0;
+	if (bounded) {
+		const ids: string[] = [];
+		const limit = Math.min(oldCount, messages.length);
+		for (let index = 0; index < limit; index += 1) {
+			for (const use of messages[index].toolUses) ids.push(use.tool_use_id);
+		}
+		rendered = new Set(ids.slice(-MAX_STATE_OLD_CALLS));
+		omitted = ids.length - rendered.size;
+	}
 	const goals = messages
 		.filter((message) => message.role === "user" && message.toolResults.length === 0 && message.text.trim().length > 0)
 		.slice(-3)
 		.map((message) => abridge(message.text, 500, 120));
-	if (goals.length > 0) chunks.push(`[Recent goals]\n${goals.join("\n---\n")}`);
+	if (goals.length > 0 && !push(`[Recent goals]\n${goals.join("\n---\n")}`)) return undefined;
+	if (omitted > 0 && !push(`[${omitted} earlier tool calls not shown]`)) return undefined;
 	for (let index = 0; index < messages.length; index += 1) {
 		const message = messages[index];
 		const old = index < oldCount;
@@ -414,19 +491,27 @@ function compactStateText(messages: readonly InternalMessage[], oldCount: number
 				parts.push(`[Assistant${old ? ", old" : ", recent"}]\n${abridge(message.text, old ? 220 : 1200, old ? 80 : 300)}`);
 			}
 			for (const use of message.toolUses) {
+				if (rendered && old && !rendered.has(use.tool_use_id)) continue;
 				const input = safeJson(use.input);
-				parts.push(`[Tool call ${use.tool}]\n${abridge(input, minimal ? 80 : 240, 0)}`);
+				parts.push(minimal
+					? `[call ${use.tool}] ${abridge(input, 80, 0)}`
+					: `[Tool call ${use.tool}]\n${abridge(input, 240, 0)}`);
 			}
 		}
 		for (const result of message.toolResults) {
+			if (rendered && old && !rendered.has(result.tool_use_id)) continue;
 			const body = result.isError ? abridge(result.text, 300, 100) : `${result.text.length} chars omitted`;
-			parts.push(`[Tool result ${result.toolName}${result.isError ? ", error" : ""}]\n${body}`);
+			parts.push(minimal
+				? `[result ${result.toolName}${result.isError ? ", error" : ""}] ${body}`
+				: `[Tool result ${result.toolName}${result.isError ? ", error" : ""}]\n${body}`);
 		}
-		if (parts.length > 0) chunks.push(parts.join("\n\n"));
+		if (parts.length > 0 && !push(parts.join("\n\n"))) return undefined;
 	}
-	return chunks.join("\n\n");
+	return { text: chunks.join("\n\n"), tokens: Math.ceil(tokens), callIds: rendered };
 }
 
+// The state is fitted once and shared by every request. A stage that already
+// exceeds the budget stops early instead of materialising the whole oversized text.
 function fitState(messages: readonly InternalMessage[], oldCount: number, maxTokens: number): StateFit {
 	const stages: Array<[StateFit["stage"], Parameters<typeof stateText>[1]]> = [
 		["full", "full"],
@@ -435,23 +520,35 @@ function fitState(messages: readonly InternalMessage[], oldCount: number, maxTok
 		["meta", "meta"],
 	];
 	for (const [stage, mode] of stages) {
-		const text = stateText(messages, mode);
-		const tokens = estimateTokens(text);
-		if (tokens <= maxTokens) return { text, tokens, stage };
+		const fitted = stateText(messages, mode, maxTokens);
+		if (fitted) return { ...fitted, stage };
 	}
 	for (const [stage, minimal] of [["compact", false], ["minimal", true]] as const) {
-		const text = compactStateText(messages, oldCount, minimal);
-		const tokens = estimateTokens(text);
-		if (tokens <= maxTokens) return { text, tokens, stage };
+		const fitted = compactStateText(messages, oldCount, minimal, maxTokens);
+		if (fitted) return { ...fitted, stage };
 	}
+	const bounded = compactStateText(messages, oldCount, true, maxTokens, true);
+	if (bounded) return { ...bounded, stage: "minimal_bounded" };
 	throw new Error(`Jev state exceeds ${maxTokens} tokens after staged reduction`);
 }
 
+// 问题正文、提问和预算估算共用同一个构造，避免估算与实际请求体漂移。
+function callQuestions(tool: ToolCandidate): Array<[string, { type: "noul"; instructions: string }]> {
+	return [
+		[`call_${tool.id}`, {
+			type: "noul",
+			instructions: `Should the historical ${tool.tool} call remain in context, including its input? Keep it if the assistant may need to know that this action was attempted, especially for errors, constraints, or later decisions.`,
+		}],
+		[`result_${tool.id}`, {
+			type: "noul",
+			instructions: `Should the full output of historical ${tool.tool} call remain verbatim? Keep it if its exact contents may be needed; otherwise it may be shortened to a head and re-run note.`,
+		}],
+	];
+}
+
 function questionTokens(tool: ToolCandidate): number {
-	return estimateTokens(JSON.stringify({
-		[`call_${tool.id}`]: "keep call",
-		[`result_${tool.id}`]: "keep result",
-	}));
+	// 问题在请求体里还要占用一个键值分隔符，一并计入，使估算不低于实际体积。
+	return estimateTokens(`${JSON.stringify(Object.fromEntries(callQuestions(tool)))},`);
 }
 
 function batches(calls: readonly ToolCandidate[], stateTokens: number, maxRequestTokens: number): ToolCandidate[][] {
@@ -488,53 +585,31 @@ async function askBatch(
 ): Promise<{ answers: Map<string, Answer>; usage: { input: number; output: number } }> {
 	const questions: Record<string, { type: "noul"; instructions: string }> = {};
 	for (const call of batch) {
-		questions[`call_${call.id}`] = {
-			type: "noul",
-			instructions: `Should the historical ${call.tool} call remain in context, including its input? Keep it if the assistant may need to know that this action was attempted, especially for errors, constraints, or later decisions.`,
-		};
-		questions[`result_${call.id}`] = {
-			type: "noul",
-			instructions: `Should the full output of historical ${call.tool} call remain verbatim? Keep it if its exact contents may be needed; otherwise it may be shortened to a head and re-run note.`,
-		};
+		for (const [key, question] of callQuestions(call)) questions[key] = question;
 	}
-	const controller = new AbortController();
-	const abort = () => controller.abort();
-	signal.addEventListener("abort", abort, { once: true });
-	const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-	try {
-		const response = await fetch(`${config.baseUrl.replace(/\/$/, "")}/v1/systemone`, {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${config.apiKey}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				model: config.model,
-				state: { conversation: redact(state) },
-				questions,
-			}),
-			signal: controller.signal,
+	const payload = await requestTypeSafe({
+		apiKey: config.apiKey,
+		baseUrl: config.baseUrl,
+		model: config.model,
+		state: { conversation: redact(state) },
+		questions,
+		signal,
+		timeoutMs: config.timeoutMs,
+	}) as JevResponse;
+	const answers = new Map<string, Answer>();
+	for (const call of batch) {
+		answers.set(call.id, {
+			keepCall: noulValue(payload, `call_${call.id}`),
+			keepResult: noulValue(payload, `result_${call.id}`),
 		});
-		if (!response.ok) throw new Error(`TypeSafe HTTP ${response.status}`);
-		const payload = (await response.json()) as JevResponse;
-		const answers = new Map<string, Answer>();
-		for (const call of batch) {
-			answers.set(call.id, {
-				keepCall: noulValue(payload, `call_${call.id}`),
-				keepResult: noulValue(payload, `result_${call.id}`),
-			});
-		}
-		return {
-			answers,
-			usage: {
-				input: payload.usage?.input_tokens ?? 0,
-				output: payload.usage?.output_tokens ?? 0,
-			},
-		};
-	} finally {
-		clearTimeout(timer);
-		signal.removeEventListener("abort", abort);
 	}
+	return {
+		answers,
+		usage: {
+			input: payload.usage?.input_tokens ?? 0,
+			output: payload.usage?.output_tokens ?? 0,
+		},
+	};
 }
 
 function decide(call: ToolCandidate, answer: Answer | undefined, threshold: number): Decision {
@@ -556,11 +631,14 @@ function abridgeSummaryText(text: string, mode: SummaryFitMode, kind: "user" | "
 	if (mode === "compact") return abridge(text, kind === "thinking" ? 400 : 700, kind === "thinking" ? 100 : 180);
 	if (mode === "skeleton") return abridge(text, kind === "thinking" ? 160 : 300, kind === "thinking" ? 40 : 80);
 	if (mode === "outline") return abridge(text, kind === "thinking" ? 80 : 140, kind === "thinking" ? 0 : 40);
+	if (mode === "bounded") return abridge(text, kind === "thinking" ? 40 : 80, 0);
 	return text;
 }
 
 function summaryInputText(input: string, mode: SummaryFitMode, protectedCall: boolean): string {
-	if (protectedCall || mode === "normal" || mode === "head" || mode === "minimal") return input;
+	if (mode === "normal" || mode === "head" || mode === "minimal") return input;
+	// 受保护写操作条目始终保留，只在紧凑档位把入参收到有界 head（预算里它占七成）。
+	if (protectedCall) return abridge(input, PROTECTED_INPUT_HEAD_CHARS, 100);
 	if (mode === "compact") return abridge(input, 480, 100);
 	if (mode === "skeleton") return abridge(input, 180, 40);
 	return `[tool input omitted; ${input.length} chars]`;
@@ -604,10 +682,41 @@ function serializeOld(
 	let charsAfter = 0;
 	let messagesKept = 0;
 	const resultMode = summaryResultMode(fitMode);
+	// 最后一档按价值丢弃：详细段之前的消息不逐条展开，但用户消息、失败结果和写操作目标
+	// 属于不可恢复的内容，仍然保留，其余工具活动只留计数。
+	const boundedCutoff = fitMode === "bounded" ? Math.max(0, transcript.oldCount - MAX_SUMMARY_OLD_MESSAGES) : 0;
+	if (boundedCutoff > 0) {
+		let calls = 0;
+		let results = 0;
+		const userHeads: string[] = [];
+		const failures: string[] = [];
+		const writes: string[] = [];
+		for (let index = 0; index < boundedCutoff; index += 1) {
+			const message = transcript.messages[index];
+			calls += message.toolUses.length;
+			results += message.toolResults.length;
+			if (message.role === "user" && message.text.trim().length > 0) userHeads.push(abridge(message.text, 80, 0));
+			for (const result of message.toolResults) {
+				if (result.isError) failures.push(`[${result.toolName}] ${abridge(result.text, 150, 50)}`);
+			}
+			for (const use of message.toolUses) {
+				if (!isWriteLikeTool(use.tool)) continue;
+				writes.push(`${use.tool}: ${abridge(safeJson(use.input), 60, 0)}`);
+			}
+		}
+		const block = [`[${boundedCutoff} earlier messages: ${calls} tool calls, ${results} results]`];
+		if (userHeads.length > 0) block.push(`[Earlier user messages]\n${userHeads.join("\n")}`);
+		if (failures.length > 0) block.push(`[Earlier tool failures]\n${failures.join("\n")}`);
+		if (writes.length > 0) block.push(`[Earlier write-like calls]\n${writes.join("\n")}`);
+		const joined = block.join("\n\n");
+		chunks.push(joined);
+		charsAfter += joined.length;
+	}
 	for (let index = 0; index < transcript.oldCount; index += 1) {
 		const message = transcript.messages[index];
 		const parts: string[] = [];
 		charsBefore += messageChars(message);
+		if (index < boundedCutoff) continue;
 		if (message.thinking) {
 			const text = abridgeSummaryText(message.thinking, fitMode, "thinking");
 			parts.push(`[Assistant thinking]\n${text}`);
@@ -668,7 +777,7 @@ function fitSerializedSummary(
 	let last: ReturnType<typeof serializeOld> | undefined;
 	let lastTokens = Number.POSITIVE_INFINITY;
 	let bestBudgetFit: (ReturnType<typeof serializeOld> & { mode: SummaryFitMode; summaryTokens: number }) | undefined;
-	for (const mode of ["normal", "head", "minimal", "compact", "skeleton", "outline"] as const) {
+	for (const mode of ["normal", "head", "minimal", "compact", "skeleton", "outline", "bounded"] as const) {
 		const serialized = serializeOld(transcript, calls, decisions, config, mode);
 		last = serialized;
 		const fullSummary = `${SUMMARY_HEADER}\n\n${serialized.text}${extraText}`;
@@ -715,24 +824,26 @@ function summaryBudget(contextWindow: number | undefined, tokensBefore?: number)
 	if (Number.isFinite(configured) && configured >= DEFAULT_SUMMARY_TOKENS) {
 		return { tokens: configured, source: "configured" };
 	}
-	if (Number.isFinite(contextWindow) && (contextWindow ?? 0) > 0) {
-		return { tokens: Math.max(DEFAULT_SUMMARY_TOKENS, Math.floor(contextWindow! * 0.4)), source: "context_window" };
-	}
-	if (Number.isFinite(tokensBefore) && (tokensBefore ?? 0) > 0) {
-		return { tokens: Math.max(DEFAULT_SUMMARY_TOKENS, Math.floor(tokensBefore! * 0.4)), source: "tokens_before" };
-	}
+	const share = (value: number, source: SummaryBudget["source"]): SummaryBudget => ({
+		tokens: Math.max(DEFAULT_SUMMARY_TOKENS, Math.min(Math.floor(value * DEFAULT_SUMMARY_SHARE), DEFAULT_SUMMARY_CAP_TOKENS)),
+		source,
+	});
+	if (Number.isFinite(contextWindow) && (contextWindow ?? 0) > 0) return share(contextWindow!, "context_window");
+	if (Number.isFinite(tokensBefore) && (tokensBefore ?? 0) > 0) return share(tokensBefore!, "tokens_before");
 	return { tokens: 64_000, source: "conservative_default" };
 }
 
 export function defaultCompactionConfig(apiKey: string, contextWindow?: number, tokensBefore?: number): CompactionConfig {
 	const budget = summaryBudget(contextWindow, tokensBefore);
+	// 单次请求取共享 Jev 预算的 75%，其余留给问题与响应；状态再取请求预算的 2/3。
+	const requestTokens = finiteEnv("TYPESAFE_COMPACTION_MAX_REQUEST_TOKENS", Math.floor(jevBudget().requestTokens * 0.75));
 	return {
 		apiKey,
 		model: typeSafeModel(),
 		baseUrl: typeSafeBaseUrl(),
 		keepThreshold: finiteEnv("TYPESAFE_COMPACTION_KEEP_THRESHOLD", 0.5, 0),
-		maxStateTokens: finiteEnv("TYPESAFE_COMPACTION_MAX_STATE_TOKENS", DEFAULT_STATE_TOKENS),
-		maxRequestTokens: finiteEnv("TYPESAFE_COMPACTION_MAX_REQUEST_TOKENS", DEFAULT_REQUEST_TOKENS),
+		maxStateTokens: finiteEnv("TYPESAFE_COMPACTION_MAX_STATE_TOKENS", Math.floor(requestTokens * 2 / 3)),
+		maxRequestTokens: requestTokens,
 		truncateHeadChars: finiteEnv("TYPESAFE_COMPACTION_TRUNCATE_HEAD_CHARS", DEFAULT_TRUNCATE_HEAD_CHARS, 0),
 		minOldReduction: finiteEnv("TYPESAFE_COMPACTION_MIN_REDUCTION", DEFAULT_MIN_REDUCTION, 0),
 		maxSummaryTokens: budget.tokens,
@@ -742,23 +853,44 @@ export function defaultCompactionConfig(apiKey: string, contextWindow?: number, 
 	};
 }
 
+async function mapWithConcurrency<T, R>(
+	items: readonly T[],
+	limit: number,
+	run: (item: T) => Promise<R>,
+): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let cursor = 0;
+	const workers = Array.from(
+		{ length: Math.max(1, Math.min(limit, items.length)) },
+		async () => {
+			for (;;) {
+				const index = cursor;
+				cursor += 1;
+				if (index >= items.length) return;
+				results[index] = await run(items[index]!);
+			}
+		},
+	);
+	await Promise.all(workers);
+	return results;
+}
+
 export async function compactSession(params: {
 	branchEntries: readonly SessionEntry[];
-	firstKeptEntryId: string;
-	tokensBefore: number;
-	fileOps: unknown;
+	preparation: CompactionPreparationInput;
 	signal: AbortSignal;
 	config: CompactionConfig;
 }): Promise<Success | Fallback> {
 	const startedAt = Date.now();
-	const contextEntries = compactedContextEntries(params.branchEntries);
-	const transcript = convertBranch(contextEntries, params.firstKeptEntryId);
-	if (!transcript) return { ok: false, fallback: "firstKeptEntryId not found on branch" };
-	if (transcript.oldCount === 0) return { ok: false, fallback: "nothing to compact before kept window" };
+	const transcript = convertPreparation(params.branchEntries, params.preparation);
+	if (!transcript) return { ok: false, fallback: "会话分支状态异常：找不到保留点" };
+	if (transcript.oldCount === 0) {
+		return { ok: false, notice: "empty", fallback: "整段历史都在保留窗口内，没有可压缩的内容" };
+	}
 	const calls = collectCalls(transcript);
 	const candidates = calls.filter((call) => !call.pinned && !call.result?.isError);
-	if (candidates.length === 0) return { ok: false, fallback: "no safe Jev candidates" };
-	if (params.signal.aborted) return { ok: false, fallback: "compaction aborted" };
+	if (candidates.length === 0) return { ok: false, fallback: "没有需要判断的工具调用，交回主模型压缩" };
+	if (params.signal.aborted) return { ok: false, notice: "cancelled", fallback: "压缩已取消" };
 
 	let fit: StateFit;
 	try {
@@ -766,9 +898,11 @@ export async function compactSession(params: {
 	} catch (error) {
 		return { ok: false, fallback: error instanceof Error ? error.message : String(error) };
 	}
+	// 只对状态里真正渲染出来的调用提问；被状态裁掉的调用没有依据，按保留处理。
+	const askable = fit.callIds ? candidates.filter((call) => fit.callIds?.has(call.toolUseId)) : candidates;
 	let requestBatches: ToolCandidate[][];
 	try {
-		requestBatches = batches(candidates, fit.tokens, params.config.maxRequestTokens);
+		requestBatches = batches(askable, fit.tokens, params.config.maxRequestTokens);
 	} catch (error) {
 		return { ok: false, fallback: error instanceof Error ? error.message : String(error) };
 	}
@@ -777,8 +911,10 @@ export async function compactSession(params: {
 	let outputTokens = 0;
 	const answers = new Map<string, Answer>();
 	try {
-		const results = await Promise.all(
-			requestBatches.map((batch) => askBatch(batch, fit.text, params.config, params.signal)),
+		const results = await mapWithConcurrency(
+			requestBatches,
+			MAX_CONCURRENT_REQUESTS,
+			(batch) => askBatch(batch, fit.text, params.config, params.signal),
 		);
 		for (const result of results) {
 			inputTokens += result.usage.input;
@@ -786,14 +922,18 @@ export async function compactSession(params: {
 			for (const [id, answer] of result.answers) answers.set(id, answer);
 		}
 	} catch (error) {
-		return { ok: false, fallback: `Jev failed: ${error instanceof Error ? error.message : String(error)}` };
+		return { ok: false, fallback: `Jev 请求失败：${error instanceof Error ? error.message : String(error)}` };
 	}
-	if (params.signal.aborted) return { ok: false, fallback: "compaction aborted" };
+	if (params.signal.aborted) return { ok: false, notice: "cancelled", fallback: "压缩已取消" };
 
 	const decisions = calls.map((call) => decide(call, answers.get(call.id), params.config.keepThreshold));
-	const fileDetailsText = fileDetails(params.fileOps);
-	const serialized = fitSerializedSummary(transcript, calls, decisions, params.config, fileDetailsText);
-	const fullSummary = `${SUMMARY_HEADER}\n\n${serialized.text}${fileDetailsText}`;
+	const fileDetailsText = fileDetails(params.preparation.fileOps);
+	const previousSummaryText = transcript.previousSummary
+		? `\n\n## Existing compaction summary\n${abridge(transcript.previousSummary, 5000, 800)}`
+		: "";
+	const summaryContext = `${previousSummaryText}${fileDetailsText}`;
+	const serialized = fitSerializedSummary(transcript, calls, decisions, params.config, summaryContext);
+	const fullSummary = `${SUMMARY_HEADER}\n\n${serialized.text}${summaryContext}`;
 	const reduction = summaryReduction(serialized);
 	const reductionWarning = reduction < params.config.minOldReduction
 		? `压缩幅度 ${Math.round(reduction * 100)}% 低于阈值 ${Math.round(params.config.minOldReduction * 100)}%，已使用预算内 JEV 摘要`
@@ -809,7 +949,9 @@ export async function compactSession(params: {
 
 	const candidatesForDetails = decisions.filter((decision) => decision.reason !== "pinned");
 	const detail = {
-		version: "lystar-jev-compaction-2",
+		version: "lystar-jev-compaction-5",
+		stateTokensTotal: fit.tokens * requestBatches.length,
+		previousSummaryMerged: Boolean(transcript.previousSummary),
 		oldMessages: transcript.oldCount,
 		keptMessages: transcript.messages.length - transcript.oldCount,
 		oldCharsBefore: serialized.charsBefore,
@@ -842,13 +984,13 @@ export async function compactSession(params: {
 	const report =
 		`Jev 压缩完成：旧内容减少 ${Math.round(reduction * 100)}%，` +
 		`工具调用保留 ${kept}/${decisions.length}，结果截断 ${droppedResults}，调用删除 ${droppedCalls}，` +
-		`${requestBatches.length} 个请求，摘要拟合 ${serialized.mode}，${detail.latencyMs}ms` +
+		`${requestBatches.length} 个请求，状态拟合 ${fit.stage} ${fit.tokens} Token，摘要拟合 ${serialized.mode}，${detail.latencyMs}ms` +
 		`${reductionWarning ? `；${reductionWarning}` : ""}；未调用主模型摘要。`;
 	return {
 		ok: true,
 		summary: fullSummary,
-		firstKeptEntryId: params.firstKeptEntryId,
-		tokensBefore: params.tokensBefore,
+		firstKeptEntryId: params.preparation.firstKeptEntryId,
+		tokensBefore: params.preparation.tokensBefore,
 		usage: usage(inputTokens, outputTokens),
 		details: { fastJev: detail },
 		report,

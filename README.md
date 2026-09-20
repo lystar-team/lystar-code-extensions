@@ -79,6 +79,9 @@ Key 文件只保存一行 Key。Extension 不会创建、修改或上传这个�
 | `TYPESAFE_MODEL` | Jev 模型 | `jev-1.13.0` |
 | `TYPESAFE_DEFAULT_MODEL` | `TYPESAFE_MODEL` 未设置时的模型 | `jev-1.13.0` |
 | `TYPESAFE_REQUEST_TIMEOUT_MS` | 共享请求超时 | `1800` |
+| `TYPESAFE_REQUEST_CHARS` | 单次 Jev 请求体字符预算 | `65536` |
+| `TYPESAFE_REQUEST_TOKENS` | 单次 Jev 请求的 Token 预算 | `40000` |
+| `TYPESAFE_REQUESTS_PER_ROUND` | 单轮 Jev 请求数上限 | `20` |
 | `TYPESAFE_GUARD_TIMEOUT_MS` | Guard 预检超时 | `1800` |
 | `TYPESAFE_SKILL_PLANNER_TIMEOUT_MS` | Skill Planner 请求超时 | `1800` |
 | `TYPESAFE_COMPACTION_TIMEOUT_MS` | Compaction 请求超时 | `12000` |
@@ -105,25 +108,25 @@ Guard 默认跳过只读工具和只读 Shell 命令。写文件、编辑文件�
 - 操作属于高影响操作，例如访问工作目录外路径、`sudo`、`ssh`、`scp`、强制删除、`git push` 或服务重启；
 - Jev 判断需要确认，或判断任务关联度很低且操作明显越界。
 
-Jev 请求失败、超时或没有 API Key 时，Guard 不阻断普通开发流程。高影响操作在无 UI 模式下无法弹出确认，会被阻断并返回原因。
+Jev 请求失败、超时或没有 API Key 时，Guard 不阻断普通开发流程。相同用户请求、分支和动作指纹的已完成判断会在本轮复用；工具执行失败后清空这类缓存。高影响操作在无 UI 模式下无法弹出确认，会被阻断并返回原因。
 
 ### lystar-jev-compaction
 
 Compaction 只监听 `session_before_compact`。它使用独立配置和独立日志，不参与工具调用预检。
 
-Jev 请求失败、超时、没有 API Key 或压缩结果无法使用时，Extension 返回明确回退原因，由 Pi 使用原生压缩流程。错误工具结果和受保护的写操作不会被 Jev 删除。
+Compaction 直接使用 Pi `session_before_compact` 提供的 preparation：`messagesToSummarize` 和 split-turn 的 `turnPrefixMessages` 是本轮待压缩历史，`firstKeptEntryId` 之后的分支消息只作为保留窗口上下文；不再按最后一条 compaction 自行截断历史。Jev 状态只拟合一次，所有请求共享同一份状态；预算按请求体形态计量，状态与摘要都有下限保证：状态逐级省略正文、仍不足时按最近 200 次调用封顶并只对状态里出现的调用提问，摘要逐级缩写、到最后一档时只逐条展开最近 200 条旧消息，更早的用户消息、工具失败和写操作目标仍然保留。摘要预算按窗口份额（0.4 × 上下文窗口）计算，并用 120,000 Token 绝对上限拦住大窗口，因此 1M 窗口不会产生成倍变大的常驻摘要。只有 Jev 请求失败或内容确实无法压缩时才回退。Jev 请求失败、超时、没有 API Key 或压缩结果无法使用时，Extension 返回明确回退原因，由 Pi 使用原生压缩流程。整段历史都在保留窗口内、或用户取消时只给出中文说明，不报回退（这两种情况本就没有可压缩的内容，Pi 自己也不产生任何提示）。错误工具结果不会被 Jev 删除；受保护的写操作条目、文件路径和 1,000 字符入参开头在紧凑档位仍然保留。
 
 ### lystar-jev-skill-planner
 
 Planner 只追加本轮响应指导，不修改 Skill 内容，也不替代 Pi 的 Skill 发现机制。
 
-没有 API Key、请求失败或 Extension 被关闭时，Planner 不追加指导，主流程继续运行。用户在请求中显式指定的 Skill 会保留在计划中。计划只影响当前请求；Session 切换时会清理上一轮计划。
+没有 API Key、请求失败或 Extension 被关闭时，Planner 不追加指导，主流程继续运行。用户显式指定的 Skill 保留在计划中，只再询问一次回复模式与简洁程度，且不携带 Skill 候选列表；显式与非显式请求都按请求指纹复用计划，指纹包含请求正文、Skill 名称与描述、上一轮已选 Skill，因此切换 Skill 会重新询问。没有可用 Skill 时不询问 Jev。计划只影响当前请求；Session 切换时会清理计划缓存。
 
 ### lystar-jev-anti-slop
 
 anti-ai-slop 使用 `agent_settled` 复核最终变更，并注册 `/slop-check` 手动检查命令。它只在被显式加载时运行。
 
-规则只产生复核提示，不自动阻断工具调用。证据不足时保持待取证状态，不凭通用偏好修改代码。该 Extension 需要项目 Skill、规则和业务上下文共同提供复核依据。
+规则只产生复核提示，不自动阻断工具调用。证据不足时保持待取证状态，不凭通用偏好修改代码。该 Extension 需要项目 Skill、规则和业务上下文共同提供复核依据。初筛与复核都按请求体预算分批发送，单批不超过 64KB；同一片段不会被重复路由。规则可用 `appliesTo` 声明适用的文件扩展名，未声明时对所有文件生效。
 
 ## 数据发送范围
 
@@ -135,9 +138,9 @@ anti-ai-slop 使用 `agent_settled` 复核最终变更，并注册 `/slop-check`
 - Edit 的限定长度变更片段；
 - anti-ai-slop 复核所需的项目事实；
 - Skill 名称、Skill 描述和上一轮选择结果；
-- 会话压缩所需的历史消息、工具调用和工具结果。
+- 会话压缩所需的 canonical summary、近期目标、候选工具名称、输入摘要和结果头部；不会在每个候选批次重复发送完整历史。
 
-请求会限制长度，并对常见 Bearer、API Key、Token、Password 和 Secret 格式进行脱敏。脱敏不是业务数据匿名化；发送前仍应检查当前请求和工作目录是否包含不应离开本机的信息。
+请求会限制长度，并对常见 Bearer、API Key、Token、Password 和 Secret 格式进行脱敏。Guard 的阶段性判断缓存只保存在当前 Pi 进程内，不写入 Session。脱敏不是业务数据匿名化；发送前仍应检查当前请求和工作目录是否包含不应离开本机的信息。
 
 可以使用 `TYPESAFE_BASE_URL` 接入自有兼容服务，也可以通过功能开关关闭对应能力。详细边界见 [`SECURITY.md`](SECURITY.md)。
 

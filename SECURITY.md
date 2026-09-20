@@ -13,10 +13,10 @@ Pi Extension 在 Pi 进程内运行，拥有启动 Pi 的用户权限。它不�
 - 工具名称、命令摘要和 Edit/Write 内容片段；
 - 最近 Assistant 计划和工具活动；
 - Skill 名称、描述和选择结果；
-- 会话压缩所需的历史内容；
+- 会话压缩所需的上一份 canonical summary、Pi preparation 提供的待压缩消息与 split-turn 前缀、`firstKeptEntryId` 之后的保留窗口上下文、候选工具名称、输入摘要和结果头部；Compaction 不在每个候选批次重复发送完整历史，也不自行绕过 Pi 的保留边界；
 - anti-ai-slop 规则要求读取的项目事实。
 
-请求有长度限制。代码会对常见的 Bearer、API Key、Token、Password 和 Secret 格式做脱敏，但不能识别所有业务机密，也不承诺业务级匿名化。
+请求有长度限制。Guard 的阶段性判断缓存只存在于当前 Pi 进程，不写入 Session 或请求正文。代码会对常见的 Bearer、API Key、Token、Password 和 Secret 格式做脱敏，但不能识别所有业务机密，也不承诺业务级匿名化。
 
 ## 凭据
 

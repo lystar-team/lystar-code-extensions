@@ -8,11 +8,25 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的可执行业务代码",
-      "requiredEvidence": ["需求或接口契约规定的默认值与失败行为", "真实触发路径、事实源和异常处理要求"],
+      "requiredEvidence": [
+        "需求或接口契约规定的默认值与失败行为",
+        "真实触发路径、事实源和异常处理要求"
+      ],
       "violation": "新增默认业务值、吞异常、假成功、猜测状态或兼容分支，掩盖源头错误，而且没有需求、接口契约或主路径需要作为依据。",
-      "exceptions": ["已有契约规定的缺省值", "明确要求的离线、重试或降级行为", "不改写业务含义的展示占位", "保留本次未修改的已有行为"],
-      "bad": {"context": "金额接口失败必须报错，不能把失败记成零元。", "artifact": "try { return await loadAmount(); } catch { return 0; }"},
-      "good": {"context": "购物车契约规定：没有商品时总额为零。", "artifact": "return items.reduce((sum, item) => sum + item.amount, 0);"}
+      "exceptions": [
+        "已有契约规定的缺省值",
+        "明确要求的离线、重试或降级行为",
+        "不改写业务含义的展示占位",
+        "保留本次未修改的已有行为"
+      ],
+      "bad": {
+        "context": "金额接口失败必须报错，不能把失败记成零元。",
+        "artifact": "try { return await loadAmount(); } catch { return 0; }"
+      },
+      "good": {
+        "context": "购物车契约规定：没有商品时总额为零。",
+        "artifact": "return items.reduce((sum, item) => sum + item.amount, 0);"
+      }
     },
     {
       "id": "empty-description",
@@ -21,11 +35,34 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的用户可见页面文案",
-      "requiredEvidence": ["页面使用者与当前主任务", "标题、字段和操作是否已经表达用途"],
+      "requiredEvidence": [
+        "页面使用者与当前主任务",
+        "标题、字段和操作是否已经表达用途"
+      ],
       "violation": "介绍只重复标题、罗列已有按钮功能、夸耀开发成果或填充组件插槽；删除后不影响用户理解、判断或操作。",
-      "exceptions": ["必要输入限制", "动作后果或错误恢复说明", "无障碍描述", "用户明确要求的介绍", "文档正文或不可见元数据，不是页面介绍"],
-      "bad": {"context": "订单页已有新增、编辑和删除按钮。", "artifact": "<p class=\"desc\">在这里，您可以新增、编辑和删除订单，轻松管理您的订单。</p>"},
-      "good": {"context": "订单删除后不可恢复，需要操作提示。", "artifact": "<p>删除后无法恢复，请确认订单已作废。</p>"}
+      "exceptions": [
+        "必要输入限制",
+        "动作后果或错误恢复说明",
+        "无障碍描述",
+        "用户明确要求的介绍",
+        "文档正文或不可见元数据，不是页面介绍"
+      ],
+      "bad": {
+        "context": "订单页已有新增、编辑和删除按钮。",
+        "artifact": "<p class=\"desc\">在这里，您可以新增、编辑和删除订单，轻松管理您的订单。</p>"
+      },
+      "good": {
+        "context": "订单删除后不可恢复，需要操作提示。",
+        "artifact": "<p>删除后无法恢复，请确认订单已作废。</p>"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "implementation-leak",
@@ -34,11 +71,33 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的业务页面可见文案，不包括源码注释、技术文档和日志",
-      "requiredEvidence": ["页面读者角色和工作任务", "技术信息是否是完成任务所需的业务内容"],
+      "requiredEvidence": [
+        "页面读者角色和工作任务",
+        "技术信息是否是完成任务所需的业务内容"
+      ],
       "violation": "向业务用户介绍接口调用、数据库、缓存、代码分层、内部 ID 或开发过程，而这些信息不服务其当前任务。",
-      "exceptions": ["开发者或运维工具中完成任务所需的技术信息", "用户指定的技术说明", "业务用户需要的专业术语或业务编号", "不对用户展示的代码、注释和日志"],
-      "bad": {"context": "财务人员使用的结算列表。", "artifact": "<p>本页面通过 Mapper 查询数据库，并由 Redis 缓存结算结果。</p>"},
-      "good": {"context": "运维人员检查缓存连通性的诊断页面。", "artifact": "<p>Redis 连接失败，请检查服务地址。</p>"}
+      "exceptions": [
+        "开发者或运维工具中完成任务所需的技术信息",
+        "用户指定的技术说明",
+        "业务用户需要的专业术语或业务编号",
+        "不对用户展示的代码、注释和日志"
+      ],
+      "bad": {
+        "context": "财务人员使用的结算列表。",
+        "artifact": "<p>本页面通过 Mapper 查询数据库，并由 Redis 缓存结算结果。</p>"
+      },
+      "good": {
+        "context": "运维人员检查缓存连通性的诊断页面。",
+        "artifact": "<p>Redis 连接失败，请检查服务地址。</p>"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "decorative-english",
@@ -47,11 +106,33 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的中文页面可见标题及子标题",
-      "requiredEvidence": ["界面语言和双语要求", "英文内容是否属于品牌、产品名或必要术语"],
+      "requiredEvidence": [
+        "界面语言和双语要求",
+        "英文内容是否属于品牌、产品名或必要术语"
+      ],
       "violation": "中文业务页面添加英文 eyebrow、kicker 或子标题，只用于装饰或重复中文标题，没有双语需求。",
-      "exceptions": ["用户指定双语或英文界面", "品牌名、产品名及必要技术术语", "代码符号、接口路径、日志和数据值", "外文引用或学习内容"],
-      "bad": {"context": "中文订单管理页面，无双语要求。", "artifact": "<small>ORDER MANAGEMENT</small><h1>订单管理</h1>"},
-      "good": {"context": "开发者创建 API 密钥的中文设置页。", "artifact": "<h2>API 密钥</h2>"}
+      "exceptions": [
+        "用户指定双语或英文界面",
+        "品牌名、产品名及必要技术术语",
+        "代码符号、接口路径、日志和数据值",
+        "外文引用或学习内容"
+      ],
+      "bad": {
+        "context": "中文订单管理页面，无双语要求。",
+        "artifact": "<small>ORDER MANAGEMENT</small><h1>订单管理</h1>"
+      },
+      "good": {
+        "context": "开发者创建 API 密钥的中文设置页。",
+        "artifact": "<h2>API 密钥</h2>"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "reuse-public-component",
@@ -60,11 +141,33 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的页面组件、交互和样式实现",
-      "requiredEvidence": ["项目内真实存在的候选公共组件及其接口", "候选组件能否满足当前数据、交互和布局需求"],
+      "requiredEvidence": [
+        "项目内真实存在的候选公共组件及其接口",
+        "候选组件能否满足当前数据、交互和布局需求"
+      ],
       "violation": "项目已有满足当前需求的公共组件，却重新编写同类组件、选择器、表格、弹窗或交互逻辑，且没有依据说明公共组件不适用。",
-      "exceptions": ["项目没有满足需求的公共组件", "公共组件的接口或行为无法满足需求，且直接复用会破坏既有契约", "明确属于页面专用且不会形成共享模式的内容", "用户明确要求独立实现"],
-      "bad": {"context": "项目已有 BaseDialog 和通用分页表格，当前页面只需复用它们。", "artifact": "<div class=\"local-dialog\"><table class=\"local-table\">...</table></div>"},
-      "good": {"context": "项目已有 UserPickerDialog，接口支持当前页面需要的搜索和多选。", "artifact": "<UserPickerDialog v-model:visible=\"visible\" :multiple=\"true\" @confirm=\"onUsersSelected\" />"}
+      "exceptions": [
+        "项目没有满足需求的公共组件",
+        "公共组件的接口或行为无法满足需求，且直接复用会破坏既有契约",
+        "明确属于页面专用且不会形成共享模式的内容",
+        "用户明确要求独立实现"
+      ],
+      "bad": {
+        "context": "项目已有 BaseDialog 和通用分页表格，当前页面只需复用它们。",
+        "artifact": "<div class=\"local-dialog\"><table class=\"local-table\">...</table></div>"
+      },
+      "good": {
+        "context": "项目已有 UserPickerDialog，接口支持当前页面需要的搜索和多选。",
+        "artifact": "<UserPickerDialog v-model:visible=\"visible\" :multiple=\"true\" @confirm=\"onUsersSelected\" />"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "business-id-input",
@@ -73,11 +176,33 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的用户可见业务页面中的对象选择与关联控件，不包括开发者、运维和接口调试工具",
-      "requiredEvidence": ["目标用户和对象选择任务", "候选数量、展示字段、搜索需求及项目已有选择组件"],
+      "requiredEvidence": [
+        "目标用户和对象选择任务",
+        "候选数量、展示字段、搜索需求及项目已有选择组件"
+      ],
       "violation": "让用户直接输入客户 ID、订单 ID、项目 ID 等内部业务标识完成对象选择；需要关联业务对象时，复杂选择没有提供点击后在 Dialog 表格中选择，简单且只展示一个字段的选择没有使用下拉组件。",
-      "exceptions": ["开发者、运维或接口调试工具的直接 ID 操作", "需求明确要求用户粘贴其已知的外部业务编号", "Dialog 或下拉内部使用 ID 作为提交值，但页面展示可读名称", "隐藏字段、路由参数和不直接要求用户输入的技术值"],
-      "bad": {"context": "销售人员创建订单，需要选择客户；页面没有双向输入 ID 的业务要求。", "artifact": "<label>客户 ID<input v-model=\"form.customerId\" placeholder=\"请输入客户ID\" /></label>"},
-      "good": {"context": "客户数量较多时用 Dialog 表格选择；部门选项少且只展示部门名称时用下拉。", "artifact": "<button @click=\"openCustomerDialog\">选择客户</button><CustomerPickerDialog v-model:visible=\"visible\" @confirm=\"onCustomerSelected\" /><select v-model=\"form.departmentId\"><option v-for=\"item in departments\" :value=\"item.id\">{{ item.name }}</option></select>"}
+      "exceptions": [
+        "开发者、运维或接口调试工具的直接 ID 操作",
+        "需求明确要求用户粘贴其已知的外部业务编号",
+        "Dialog 或下拉内部使用 ID 作为提交值，但页面展示可读名称",
+        "隐藏字段、路由参数和不直接要求用户输入的技术值"
+      ],
+      "bad": {
+        "context": "销售人员创建订单，需要选择客户；页面没有双向输入 ID 的业务要求。",
+        "artifact": "<label>客户 ID<input v-model=\"form.customerId\" placeholder=\"请输入客户ID\" /></label>"
+      },
+      "good": {
+        "context": "客户数量较多时用 Dialog 表格选择；部门选项少且只展示部门名称时用下拉。",
+        "artifact": "<button @click=\"openCustomerDialog\">选择客户</button><CustomerPickerDialog v-model:visible=\"visible\" @confirm=\"onCustomerSelected\" /><select v-model=\"form.departmentId\"><option v-for=\"item in departments\" :value=\"item.id\">{{ item.name }}</option></select>"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "dictionary-label-required",
@@ -86,11 +211,32 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的用户可见字段、表格、标签、详情和筛选选项中来自字典的值",
-      "requiredEvidence": ["字段属于字典项的项目证据", "字典来源、映射函数或标签组件及页面读者"],
+      "requiredEvidence": [
+        "字段属于字典项的项目证据",
+        "字典来源、映射函数或标签组件及页面读者"
+      ],
       "violation": "把字典 code 或原始值直接输出到页面，未通过项目字典映射、标签组件或格式化函数转换为用户可读文本。",
-      "exceptions": ["开发者、运维、审计或接口调试工具明确需要查看原始 code", "接口文档、日志和源码，不属于用户可见业务页面", "用户明确要求同时展示原始 code 的业务场景"],
-      "bad": {"context": "订单状态字典返回 pending、paid、cancelled，订单列表面向业务人员。", "artifact": "<span>{{ row.status }}</span>"},
-      "good": {"context": "订单状态字典已在页面注册，业务人员只需要看到可读名称。", "artifact": "<DictLabel type=\"order_status\" :value=\"row.status\" />"}
+      "exceptions": [
+        "开发者、运维、审计或接口调试工具明确需要查看原始 code",
+        "接口文档、日志和源码，不属于用户可见业务页面",
+        "用户明确要求同时展示原始 code 的业务场景"
+      ],
+      "bad": {
+        "context": "订单状态字典返回 pending、paid、cancelled，订单列表面向业务人员。",
+        "artifact": "<span>{{ row.status }}</span>"
+      },
+      "good": {
+        "context": "订单状态字典已在页面注册，业务人员只需要看到可读名称。",
+        "artifact": "<DictLabel type=\"order_status\" :value=\"row.status\" />"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "user-facing-plain-language",
@@ -99,11 +245,34 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的面向普通业务用户、客户或公众的页面标题、字段、按钮、提示、空状态和错误信息",
-      "requiredEvidence": ["目标用户及其完成当前任务所需的知识", "页面可见原文、业务含义和必须保留的字段边界", "项目术语表、产品固定称谓或用户明确要求保留的专业术语"],
+      "requiredEvidence": [
+        "目标用户及其完成当前任务所需的知识",
+        "页面可见原文、业务含义和必须保留的字段边界",
+        "项目术语表、产品固定称谓或用户明确要求保留的专业术语"
+      ],
       "violation": "面向普通用户直接展示接口、协议、缓存、数据库、代码层级、技术缩写或内部术语，或者使用含义模糊、模板化的文案，导致目标用户无法理解发生了什么、需要做什么或操作会产生什么结果。",
-      "exceptions": ["开发者、运维、审计或专业人员完成任务所需的技术信息", "品牌名、产品名、法律名称和业务领域必须使用的正式术语", "用户明确要求保留原始术语或原文", "代码、日志、接口文档及不进入页面渲染的内容"],
-      "bad": {"context": "普通客户查看订单，系统暂时无法读取订单数据。", "artifact": "<p>HTTP 500：Redis 缓存穿透，Service 调用失败。</p>"},
-      "good": {"context": "普通客户查看订单，系统暂时无法读取订单数据。", "artifact": "<p>暂时无法加载订单，请稍后重试。</p>"}
+      "exceptions": [
+        "开发者、运维、审计或专业人员完成任务所需的技术信息",
+        "品牌名、产品名、法律名称和业务领域必须使用的正式术语",
+        "用户明确要求保留原始术语或原文",
+        "代码、日志、接口文档及不进入页面渲染的内容"
+      ],
+      "bad": {
+        "context": "普通客户查看订单，系统暂时无法读取订单数据。",
+        "artifact": "<p>HTTP 500：Redis 缓存穿透，Service 调用失败。</p>"
+      },
+      "good": {
+        "context": "普通客户查看订单，系统暂时无法读取订单数据。",
+        "artifact": "<p>暂时无法加载订单，请稍后重试。</p>"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "user-centered-information-architecture",
@@ -112,11 +281,34 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或明显调整的用户可见页面结构、内容层级、操作入口和首屏承载方式",
-      "requiredEvidence": ["目标用户、主任务、高频操作和完成路径", "页面内容的优先级、关联关系和必须同时比较的信息", "目标视口下的真实页面、截图或可复现布局证据"],
+      "requiredEvidence": [
+        "目标用户、主任务、高频操作和完成路径",
+        "页面内容的优先级、关联关系和必须同时比较的信息",
+        "目标视口下的真实页面、截图或可复现布局证据"
+      ],
       "violation": "把多个无共同任务的完整模块、表单、表格、指标或操作以同等权重堆在一个页面或首屏，没有清晰主任务、信息层级、分组、次级入口或按需展开方式，导致用户难以扫描、理解或完成操作。",
-      "exceptions": ["监控、对账、调度或工作台任务明确需要同时观察和比较多组信息", "面向熟练专业用户且需求明确要求高密度操作", "用户指定的总览页或大屏，并且主次层级和操作路径仍然清楚", "本次只修改局部内容且没有授权重做既有页面结构"],
-      "bad": {"context": "客服人员的主任务是查询和处理工单，客户管理、员工配置和系统日志属于独立任务。", "artifact": "<main><TicketTable/><CustomerForm/><StaffAdmin/><SystemLogs/><ReportCharts/></main>"},
-      "good": {"context": "客服人员的主任务是查询和处理工单，客户详情是处理工单时的辅助信息。", "artifact": "<main><TicketFilters/><TicketTable/><CustomerDrawer v-model:open=\"customerOpen\"/></main>"}
+      "exceptions": [
+        "监控、对账、调度或工作台任务明确需要同时观察和比较多组信息",
+        "面向熟练专业用户且需求明确要求高密度操作",
+        "用户指定的总览页或大屏，并且主次层级和操作路径仍然清楚",
+        "本次只修改局部内容且没有授权重做既有页面结构"
+      ],
+      "bad": {
+        "context": "客服人员的主任务是查询和处理工单，客户管理、员工配置和系统日志属于独立任务。",
+        "artifact": "<main><TicketTable/><CustomerForm/><StaffAdmin/><SystemLogs/><ReportCharts/></main>"
+      },
+      "good": {
+        "context": "客服人员的主任务是查询和处理工单，客户详情是处理工单时的辅助信息。",
+        "artifact": "<main><TicketFilters/><TicketTable/><CustomerDrawer v-model:open=\"customerOpen\"/></main>"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "design-spec-compliance",
@@ -125,11 +317,35 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "项目存在且适用于当前页面的 DESIGN.md 时，本次新增或修改的配色、排版、间距、圆角、组件形态、布局和交互视觉",
-      "requiredEvidence": ["项目 DESIGN.md 的实际路径、适用范围和相关原文条款", "项目现有设计 token、公共组件和页面实现", "目标视口下的真实页面或截图与规范的对照结果"],
+      "requiredEvidence": [
+        "项目 DESIGN.md 的实际路径、适用范围和相关原文条款",
+        "项目现有设计 token、公共组件和页面实现",
+        "目标视口下的真实页面或截图与规范的对照结果"
+      ],
       "violation": "当前页面使用的颜色、字体、间距、圆角、布局、组件或交互视觉与适用的 DESIGN.md 明确冲突，绕过项目 token 或公共组件形成另一套视觉语言，而且没有用户确认的偏离依据。",
-      "exceptions": ["项目没有 DESIGN.md，或该文件明确不适用于当前页面", "DESIGN.md 没有规定当前设计项", "用户明确要求并确认本次偏离设计规范", "无障碍、平台限制或真实内容要求必须调整，且调整保留规范的设计意图", "本次任务不涉及可见 UI 变化"],
-      "bad": {"context": "DESIGN.md 规定后台使用蓝色主色 token、4/8 倍数间距和 6px 圆角，页面应复用项目按钮。", "artifact": "<button style=\"background:linear-gradient(90deg,#7c3aed,#ec4899);padding:13px 19px;border-radius:24px\">提交</button>"},
-      "good": {"context": "DESIGN.md 规定后台使用蓝色主色 token、4/8 倍数间距和 6px 圆角，项目已有 PrimaryButton。", "artifact": "<PrimaryButton>提交</PrimaryButton>"}
+      "exceptions": [
+        "项目没有 DESIGN.md，或该文件明确不适用于当前页面",
+        "DESIGN.md 没有规定当前设计项",
+        "用户明确要求并确认本次偏离设计规范",
+        "无障碍、平台限制或真实内容要求必须调整，且调整保留规范的设计意图",
+        "本次任务不涉及可见 UI 变化"
+      ],
+      "bad": {
+        "context": "DESIGN.md 规定后台使用蓝色主色 token、4/8 倍数间距和 6px 圆角，页面应复用项目按钮。",
+        "artifact": "<button style=\"background:linear-gradient(90deg,#7c3aed,#ec4899);padding:13px 19px;border-radius:24px\">提交</button>"
+      },
+      "good": {
+        "context": "DESIGN.md 规定后台使用蓝色主色 token、4/8 倍数间距和 6px 圆角，项目已有 PrimaryButton。",
+        "artifact": "<PrimaryButton>提交</PrimaryButton>"
+      },
+      "appliesTo": [
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".tsx",
+        ".jsx"
+      ]
     },
     {
       "id": "frontend-component-decomposition",
@@ -138,11 +354,27 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或明显扩展的前端页面、组件、组合式函数、Hook 及其模板、脚本和样式责任",
-      "requiredEvidence": ["目标文件的行数、主要区域、状态、数据请求、事件和交互生命周期", "可拆分区域是否拥有独立任务、状态或输入输出边界", "相同实现的真实调用位置、共同变更原因及项目现有组件目录约定"],
+      "requiredEvidence": [
+        "目标文件的行数、主要区域、状态、数据请求、事件和交互生命周期",
+        "可拆分区域是否拥有独立任务、状态或输入输出边界",
+        "相同实现的真实调用位置、共同变更原因及项目现有组件目录约定"
+      ],
       "violation": "把多个可独立理解、测试或维护的页面区域、交互流程、状态生命周期和数据职责继续堆在同一个超大组件中，导致文件达到数千行或责任明显混杂；或者同一稳定 UI 与交互已在多个位置重复实现，却没有形成符合项目约定的公共组件。行数本身不是唯一依据。",
-      "exceptions": ["拆分后只会产生大量无职责的透传组件，不能改善责任边界", "单一画布、编辑器或媒体生命周期高度耦合，项目事实不支持拆分", "生成代码、静态 schema、图标数据或第三方产物", "当前只修改既有超大文件中的局部内容，用户没有授权重构无关区域", "实现只使用一次且没有独立生命周期、共享契约或共同变更原因"],
-      "bad": {"context": "一个 2600 行客户中心页面同时维护列表查询、客户编辑、批量导入、统计图表和操作日志；这些区域有独立接口、状态和交互。", "artifact": "<template><CustomerList/><CustomerEditor/><ImportWizard/><AnalyticsCharts/><OperationLogs/></template><script setup>// 所有请求、状态、校验和事件集中在此文件</script>"},
-      "good": {"context": "页面保留路由上下文和主任务编排；筛选、列表、编辑抽屉拥有独立责任，多页面共用的 CustomerPicker 进入公共组件目录。", "artifact": "<template><CustomerFilters/><CustomerTable/><CustomerEditorDrawer/><CustomerPicker/></template>"}
+      "exceptions": [
+        "拆分后只会产生大量无职责的透传组件，不能改善责任边界",
+        "单一画布、编辑器或媒体生命周期高度耦合，项目事实不支持拆分",
+        "生成代码、静态 schema、图标数据或第三方产物",
+        "当前只修改既有超大文件中的局部内容，用户没有授权重构无关区域",
+        "实现只使用一次且没有独立生命周期、共享契约或共同变更原因"
+      ],
+      "bad": {
+        "context": "一个 2600 行客户中心页面同时维护列表查询、客户编辑、批量导入、统计图表和操作日志；这些区域有独立接口、状态和交互。",
+        "artifact": "<template><CustomerList/><CustomerEditor/><ImportWizard/><AnalyticsCharts/><OperationLogs/></template><script setup>// 所有请求、状态、校验和事件集中在此文件</script>"
+      },
+      "good": {
+        "context": "页面保留路由上下文和主任务编排；筛选、列表、编辑抽屉拥有独立责任，多页面共用的 CustomerPicker 进入公共组件目录。",
+        "artifact": "<template><CustomerFilters/><CustomerTable/><CustomerEditorDrawer/><CustomerPicker/></template>"
+      }
     },
     {
       "id": "performance-conscious-implementation",
@@ -151,11 +383,27 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的前后端请求链路、数据库访问、批处理、循环、数据结构、渲染、计算、网络传输和资源加载",
-      "requiredEvidence": ["真实或契约约定的数据规模、调用频率、响应目标及运行环境", "当前实现的查询次数、I/O、计算复杂度、渲染次数、内存或网络开销", "项目已有的批量接口、索引、分页、虚拟列表、缓存或其他等价正确方案，以及必要的基准、查询计划或性能探测"],
+      "requiredEvidence": [
+        "真实或契约约定的数据规模、调用频率、响应目标及运行环境",
+        "当前实现的查询次数、I/O、计算复杂度、渲染次数、内存或网络开销",
+        "项目已有的批量接口、索引、分页、虚拟列表、缓存或其他等价正确方案，以及必要的基准、查询计划或性能探测"
+      ],
       "violation": "在正确性和业务行为相同的可用方案中，当前实现产生可避免且会随真实负载放大的查询、I/O、计算、渲染、内存或网络开销，例如 N+1 查询、循环内远程调用、无界全量读取、重复重算大型数据、明显不合适的数据结构或阻塞关键线程，却没有依据说明更低开销方案不适用。",
-      "exceptions": ["数据规模和调用次数有明确小上界，替代方案没有可证明收益", "事务一致性、顺序、权限、安全、精度或平台约束要求当前实现", "优化会引入缓存失效、并发错误、额外依赖或显著复杂度，而当前路径没有真实性能压力", "基准或项目事实不能证明替代方案更优时，不以理论推测判违规", "当前改动不在性能问题责任位置，用户没有授权重构无关链路"],
-      "bad": {"context": "订单接口单页最多返回 500 条记录，客户仓储支持按 ID 批量查询。", "artifact": "for (const order of orders) { order.customer = await customerRepository.findById(order.customerId); }"},
-      "good": {"context": "订单接口单页最多返回 500 条记录，客户仓储支持按 ID 批量查询。", "artifact": "const customers = await customerRepository.findByIds([...new Set(orders.map(item => item.customerId))]); const byId = new Map(customers.map(item => [item.id, item]));"}
+      "exceptions": [
+        "数据规模和调用次数有明确小上界，替代方案没有可证明收益",
+        "事务一致性、顺序、权限、安全、精度或平台约束要求当前实现",
+        "优化会引入缓存失效、并发错误、额外依赖或显著复杂度，而当前路径没有真实性能压力",
+        "基准或项目事实不能证明替代方案更优时，不以理论推测判违规",
+        "当前改动不在性能问题责任位置，用户没有授权重构无关链路"
+      ],
+      "bad": {
+        "context": "订单接口单页最多返回 500 条记录，客户仓储支持按 ID 批量查询。",
+        "artifact": "for (const order of orders) { order.customer = await customerRepository.findById(order.customerId); }"
+      },
+      "good": {
+        "context": "订单接口单页最多返回 500 条记录，客户仓储支持按 ID 批量查询。",
+        "artifact": "const customers = await customerRepository.findByIds([...new Set(orders.map(item => item.customerId))]); const byId = new Map(customers.map(item => [item.id, item]));"
+      }
     },
     {
       "id": "business-realistic-test-data",
@@ -164,11 +412,27 @@
       "action": "review",
       "threshold": 0.8,
       "scope": "本次新增或修改的自动测试、测试夹具、Factory、Mock、Seed、演示环境和验收数据中会写入数据库、接口响应或用户界面的编号、名称、备注及关联业务信息",
-      "requiredEvidence": ["被测业务实体、字段含义、编号格式和数据校验规则", "测试场景需要表达的业务状态、字段关系和唯一性要求", "项目已有的真实示例、字典、区域、组织及脱敏规则，以及数据是否会在界面或验收结果中展示"],
+      "requiredEvidence": [
+        "被测业务实体、字段含义、编号格式和数据校验规则",
+        "测试场景需要表达的业务状态、字段关系和唯一性要求",
+        "项目已有的真实示例、字典、区域、组织及脱敏规则，以及数据是否会在界面或验收结果中展示"
+      ],
       "violation": "测试数据使用 batch、批次、legacy、test、demo、mock、temp、sample、随机串、技术任务名或断言描述拼成用户可见编号、客户名、项目名、备注等业务字段，或者字段之间缺少真实业务关系，导致页面展示出明显为脚本填充、与业务无关或无法理解的数据。",
-      "exceptions": ["被测业务本身就是批次、遗留迁移、演示或测试数据管理，相关词是正式业务字段", "协议、数据库主键或第三方接口要求 UUID、雪花 ID、哈希等机器标识，且不会作为业务名称或说明直接展示", "负载、模糊、安全和边界测试明确需要随机、超长、非法或重复数据", "断言专用标记只存在于测试内部，不写入业务字段、不进入接口结果和用户界面", "为避免使用真实个人或企业信息而创建虚构数据，但名称、编号、地址、金额、日期和关联关系仍符合业务语义"],
-      "bad": {"context": "收费记录会进入验收页面，项目编号格式和客户名称都有正式业务约定。", "artifact": "{ paymentNo: 'LEGACY-PAYMENT-1077', customerName: '白关园区验收企业客户', remark: 'batch-3' }"},
-      "good": {"context": "收费记录会进入验收页面，缴费单号使用 JF+日期+序号，客户使用虚构但自然的企业名称。", "artifact": "{ paymentNo: 'JF202609190021', customerName: '湘潭华远物业服务有限公司', feeItem: '2026年9月园区物业费', amount: 160.00 }"}
+      "exceptions": [
+        "被测业务本身就是批次、遗留迁移、演示或测试数据管理，相关词是正式业务字段",
+        "协议、数据库主键或第三方接口要求 UUID、雪花 ID、哈希等机器标识，且不会作为业务名称或说明直接展示",
+        "负载、模糊、安全和边界测试明确需要随机、超长、非法或重复数据",
+        "断言专用标记只存在于测试内部，不写入业务字段、不进入接口结果和用户界面",
+        "为避免使用真实个人或企业信息而创建虚构数据，但名称、编号、地址、金额、日期和关联关系仍符合业务语义"
+      ],
+      "bad": {
+        "context": "收费记录会进入验收页面，项目编号格式和客户名称都有正式业务约定。",
+        "artifact": "{ paymentNo: 'LEGACY-PAYMENT-1077', customerName: '白关园区验收企业客户', remark: 'batch-3' }"
+      },
+      "good": {
+        "context": "收费记录会进入验收页面，缴费单号使用 JF+日期+序号，客户使用虚构但自然的企业名称。",
+        "artifact": "{ paymentNo: 'JF202609190021', customerName: '湘潭华远物业服务有限公司', feeItem: '2026年9月园区物业费', amount: 160.00 }"
+      }
     }
   ]
 }

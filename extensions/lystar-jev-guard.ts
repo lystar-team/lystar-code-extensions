@@ -45,7 +45,8 @@ const SAFE_STDERR_REDIRECT = /\s+2\s*>\s*\/dev\/null\s*$/i;
 let currentPrompt = "";
 let warnedMissingKey = false;
 let debugEnabled = false;
-let cache = new Map<string, Promise<PreflightDecision>>();
+type CachedDecision = Promise<PreflightDecision> | PreflightDecision;
+let cache = new Map<string, CachedDecision>();
 
 function clip(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, max)}…`;
@@ -356,11 +357,11 @@ function cacheKey(toolName: string, action: Record<string, unknown>, execution: 
 		prompt: redact(clip(currentPrompt, 6000)),
 		toolName,
 		action,
-		execution,
+		branchLeafId: execution.branchLeafId,
 	});
 }
 
-function cacheSet(key: string, value: Promise<PreflightDecision>): void {
+function cacheSet(key: string, value: CachedDecision): void {
 	cache.set(key, value);
 	while (cache.size > CACHE_LIMIT) {
 		const first = cache.keys().next().value;
@@ -508,16 +509,14 @@ export default function lystarJevGuard(pi: ExtensionAPI): void {
 		let decision: PreflightDecision;
 		try {
 			decision = await pending;
+			cacheSet(key, decision);
 		} catch {
+			cache.delete(key);
 			// JEV is a workflow signal, not the permission boundary. API failure never
 			// blocks the user's normal coding path.
 			if (ctx.hasUI) ctx.ui.setStatus("lystar-jev-guard", "Jev 不可用 · 已按回退策略放行");
 			notify(ctx, "Jev 不可用，已按回退策略放行当前工具调用", "warning");
 			return;
-		} finally {
-			// Cache only de-duplicates the same in-flight judgment. Later evidence must
-			// produce a fresh decision instead of reusing a stale semantic result.
-			cache.delete(key);
 		}
 
 		debugLog(
@@ -556,8 +555,8 @@ export default function lystarJevGuard(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_result", (event: ToolResultEvent, ctx) => {
-		cache = new Map();
 		if (!event.isError) return;
+		cache = new Map();
 		debugLog(`execution_failed tool=${event.toolName}`);
 		if (ctx.hasUI) ctx.ui.setStatus("lystar-jev-guard", `工具执行失败（真实返回）· ${event.toolName}`);
 	});

@@ -70,18 +70,24 @@ export default function lystarJevCompaction(pi: ExtensionAPI): void {
 		const config = defaultCompactionConfig(apiKey, contextWindow, event.preparation.tokensBefore);
 		debugLog(
 			`compaction start reason=${event.reason} context_window=${contextWindow ?? "unknown"} ` +
-			`summary_budget=${config.maxSummaryTokens} source=${config.summaryBudgetSource}`,
+			`summary_budget=${config.maxSummaryTokens} source=${config.summaryBudgetSource} ` +
+			`tokens_before=${event.preparation.tokensBefore}`,
 		);
 		const outcome = await compactSession({
 			branchEntries: event.branchEntries,
-			firstKeptEntryId: event.preparation.firstKeptEntryId,
-			tokensBefore: event.preparation.tokensBefore,
-			fileOps: event.preparation.fileOps,
+			preparation: event.preparation,
 			signal: event.signal,
 			config,
 		});
 
 		if ("fallback" in outcome) {
+			// 用户取消不提示；没有可压缩内容时说明原因，不报回退。
+			if (outcome.notice === "cancelled") return;
+			if (outcome.notice === "empty") {
+				debugLog(`compaction skipped: ${outcome.fallback} tokens_before=${event.preparation.tokensBefore}`);
+				notify(ctx, outcome.fallback, "info");
+				return;
+			}
 			const message = `Jev 压缩回退：${outcome.fallback}`;
 			debugLog(`${message} context_window=${contextWindow ?? "unknown"} budget=${config.maxSummaryTokens}`);
 			notify(ctx, message, "warning");

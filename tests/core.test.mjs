@@ -33,6 +33,28 @@ test('共享配置使用统一的模型和地址优先级', () => {
   }
 });
 
+test('共享客户端保留失败响应的原因', async () => {
+  const { requestTypeSafe } = await import('../extensions/typesafe-core.mjs');
+  const previousKey = process.env.TYPESAFE_API_KEY;
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.TYPESAFE_API_KEY = 'unit-test-key';
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 400,
+      text: async () => '{"detail":{"error_type":"max_tokens_exceeded"}}',
+    });
+    await assert.rejects(
+      () => requestTypeSafe({ state: {}, questions: {}, timeoutMs: 100 }),
+      /TypeSafe HTTP 400: .*max_tokens_exceeded/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousKey === undefined) delete process.env.TYPESAFE_API_KEY;
+    else process.env.TYPESAFE_API_KEY = previousKey;
+  }
+});
+
 test('共享客户端发送统一的模型、问题和请求地址', async () => {
   const { requestTypeSafe } = await import('../extensions/typesafe-core.mjs');
   const previous = {

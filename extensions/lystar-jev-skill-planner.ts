@@ -60,6 +60,7 @@ const DEFAULT_RELEVANCE_THRESHOLD = 0.5;
 const DEFAULT_CARRY_THRESHOLD = 0.5;
 
 let previousPlan: SkillPlan | undefined;
+let planCache = new Map<string, SkillPlan>();
 let debugEnabled = false;
 
 function envProbability(name: string, fallback: number): number {
@@ -112,10 +113,6 @@ function buildState(
 ): { state: PlannerState; candidates: SkillCandidate[] } {
 	const explicitSkills = extractExplicitSkillNames(event.prompt);
 	const explicitSet = new Set(explicitSkills);
-	const availableSkills = skills.map((skill) => ({
-		name: skill.name,
-		description: clip(skill.description, 320),
-	}));
 	const candidates = skills
 		.filter((skill) => !skill.disableModelInvocation || explicitSet.has(skill.name))
 		.map((skill) => ({
@@ -128,7 +125,7 @@ function buildState(
 		state: {
 			request: clip(stripSkillMarkup(event.prompt), 8000),
 			explicitSkills,
-			availableSkills,
+			availableSkills: candidates.map(({ name, description }) => ({ name, description })),
 			previousSkills: previousPlan?.selected.map((skill) => skill.name) ?? [],
 		},
 		candidates,
@@ -257,49 +254,84 @@ function createPlan(
 }
 
 function responseGuidance(plan: SkillPlan): string {
-	if (plan.responseMode === "plan") {
-		return "先给清晰结论，再按执行顺序列出必要步骤。";
-	}
-	if (plan.responseMode === "implementation_report") {
-		return "先汇报结果，再列出改动和已验证内容；未验证内容直说。";
-	}
-	if (plan.responseMode === "document") {
-		return "按用户要求组织完整内容，保留事实、术语和责任主体。";
-	}
+	if (plan.responseMode === "plan") return "先给结论，再列必要步骤。";
+	if (plan.responseMode === "implementation_report") return "先汇报结果，再列改动和已验证内容；未验证内容直说。";
+	if (plan.responseMode === "document") return "按用户要求组织完整内容，保留事实和责任主体。";
 	return "直接回答当前问题，使用简单、直白的中文。";
 }
 
 export function buildGuidanceBlock(plan: SkillPlan): string {
-	const skillLines = plan.selected.length > 0
-		? plan.selected.map((skill) => `  <skill name="${escapeXml(skill.name)}" relevance="${skill.relevance.toFixed(2)}" />`)
-		: ["  <skill name=\"none\" />"];
-	const styleLines = [
-		`  <mode>${plan.responseMode}</mode>`,
-		`  <concise>${plan.concise >= 0.5 ? "true" : "false"}</concise>`,
-		`  <instruction>${escapeXml(responseGuidance(plan))}</instruction>`,
-	];
-	if (plan.selected.some((skill) => skill.name === "shuorenhua")) {
-		styleLines.push("  <instruction>使用 shuorenhua 的表达要求，删掉套话、拔高和无关解释。</instruction>");
-	}
+	const skills = plan.selected.map((skill) => escapeXml(skill.name)).join(",") || "none";
+	const guidance = responseGuidance(plan);
+	const language = plan.selected.some((skill) => skill.name === "shuorenhua")
+		? "；删掉套话、拔高和无关解释"
+		: "";
+	const instruction = language ? `${guidance.replace(/。$/, "")}${language}` : guidance;
+	return `\n<jev_skill_plan skills="${skills}" mode="${plan.responseMode}" concise="${plan.concise >= 0.5 ? "true" : "false"}">${escapeXml(instruction)}</jev_skill_plan>`;
+}
 
-	return [
-		"",
-		"<jev_skill_plan>",
-		"  <instruction>按本轮任务需要读取下列 Skill。Skill 数量由本轮判断决定。</instruction>",
-		...skillLines,
-		"</jev_skill_plan>",
-		"<jev_response_contract>",
-		...styleLines,
-		"</jev_response_contract>",
-	].join("\n");
+function planKey(state: PlannerState, candidates: SkillCandidate[]): string {
+	return JSON.stringify({
+		request: state.request,
+		candidates: candidates.map((candidate) => [candidate.name, candidate.description]),
+		previousSkills: state.previousSkills,
+	});
+}
+
+function explicitPlan(state: PlannerState, candidates: SkillCandidate[]): SkillPlan | undefined {
+	if (state.explicitSkills.length === 0) return undefined;
+	const selected = new Map<string, SkillScore>();
+	for (const candidate of candidates.filter((item) => item.explicit)) {
+		selected.set(candidate.name, { ...candidate, relevance: 1 });
+	}
+	for (const name of state.explicitSkills) {
+		if (!selected.has(name)) {
+			selected.set(name, { name, description: "用户显式指定的 Skill", explicit: true, relevance: 1 });
+		}
+	}
+	return {
+		selected: [...selected.values()],
+		needSkill: 1,
+		responseMode: "direct",
+		concise: 1,
+		carryPrevious: 0,
+		latencyMs: 0,
+	};
 }
 
 async function planTurn(event: BeforeAgentStartEvent): Promise<SkillPlan> {
 	const skills = event.systemPromptOptions.skills ?? [];
 	const { state, candidates } = buildState(event, skills);
+	const key = planKey(state, candidates);
+	const cached = planCache.get(key);
+	if (cached) return cached;
+	const remember = (plan: SkillPlan): SkillPlan => {
+		planCache.set(key, plan);
+		while (planCache.size > 16) planCache.delete(planCache.keys().next().value!);
+		return plan;
+	};
+	const direct = explicitPlan(state, candidates);
+	if (direct) {
+		const fullQuestions = buildQuestions([], false);
+		const questions = {
+			response_mode: fullQuestions.response_mode,
+			concise: fullQuestions.concise,
+		};
+		const result = await askJev({ ...state, availableSkills: [] }, questions);
+		return remember({
+			...direct,
+			responseMode: answerChoice(result.response, "response_mode"),
+			concise: answerNoul(result.response, "concise", 1),
+			model: result.response.model,
+			latencyMs: result.latencyMs,
+		});
+	}
+	if (candidates.length === 0) {
+		return { selected: [], needSkill: 0, responseMode: "direct", concise: 1, carryPrevious: 0, latencyMs: 0 };
+	}
 	const questions = buildQuestions(candidates, state.previousSkills.length > 0);
 	const result = await askJev(state, questions);
-	return createPlan(state, candidates, result.response, result.latencyMs);
+	return remember(createPlan(state, candidates, result.response, result.latencyMs));
 }
 
 export default function lystarJevSkillPlanner(pi: ExtensionAPI): void {
@@ -307,6 +339,7 @@ export default function lystarJevSkillPlanner(pi: ExtensionAPI): void {
 
 	pi.on("session_start", () => {
 		previousPlan = undefined;
+		planCache = new Map();
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -319,6 +352,7 @@ export default function lystarJevSkillPlanner(pi: ExtensionAPI): void {
 		try {
 			const plan = await planTurn(event);
 			previousPlan = plan;
+
 			const guidance = buildGuidanceBlock(plan);
 			debugLog(
 				`selected=${plan.selected.map((skill) => skill.name).join(",") || "none"} ` +

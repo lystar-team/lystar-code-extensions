@@ -3,6 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { extname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { jevBudget } from '../typesafe-core.mjs';
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_RULES_PATH = fileURLToPath(new URL('../../rules/anti-ai-slop.rules.json', import.meta.url));
@@ -16,11 +17,15 @@ const CANDIDATE_LIMIT = 2600;
 const REQUEST_LIMIT = 4000;
 const EVIDENCE_LIMIT = 1800;
 const MAX_FILES = 20;
+// 单个文件最多检查的片段数。这是覆盖范围与公平性的上限，按片段计量，不是请求预算；
+// 超出部分由下面的请求预算分批承担。
 const MAX_HUNKS_PER_FILE = 12;
-const MAX_ROUTE_CALLS = 20;
-const MAX_JUDGMENT_CALLS = 12;
+// 会话内保留的项目事实条数，超出时从头部丢弃并记录偏移。
+const MAX_EVIDENCE_STORE = 20;
 const MAX_EVIDENCE_ITEMS = 6;
-const ROUTE_THRESHOLD = 0.55;
+// 初筛门槛按 2026-09-20 会话日志的 31 条候选标定：0.55 到 0.75 区间全部为待取证或误报，
+// 阈值提到 0.75 可去除约 80% 噪音，同时保留唯一一次定位到真实问题的 0.78 候选。
+const ROUTE_THRESHOLD = 0.75;
 const REVIEW_THRESHOLD = 0.75;
 const MAX_AUTOMATIC_REVIEW_TURNS = 2;
 const SOURCE = new Set(['.vue', '.svelte', '.html', '.htm', '.tsx', '.jsx', '.ts', '.js', '.mjs', '.cjs', '.py', '.java', '.kt', '.go', '.rs', '.php', '.rb', '.cs', '.json']);
@@ -48,6 +53,10 @@ export function loadRules(path = configuredRulesPath()) {
       if (typeof rule[field]?.context !== 'string' || typeof rule[field]?.artifact !== 'string') throw new Error(`${rule.id}：缺少 ${field} 正反例`);
     }
     if (!(typeof rule.threshold === 'number' && rule.threshold > 0.5 && rule.threshold <= 1)) throw new Error(`${rule.id}：threshold 须大于 0.5 且不超过 1`);
+    if (rule.appliesTo !== undefined) {
+      assertStringArray(rule.appliesTo, `${rule.id}：appliesTo`);
+      if (rule.appliesTo.some(extension => !/^\.[a-z0-9]+$/i.test(extension))) throw new Error(`${rule.id}：appliesTo 只接受 .ext 形式的文件扩展名`);
+    }
   }
   return config.rules.filter(rule => rule.enabled);
 }
@@ -193,33 +202,113 @@ function probability(response, key) {
   return answer.noul;
 }
 
-function routeQuestions(rules) {
-  return Object.fromEntries(rules.map((rule, index) => [`r${index}`, {
+const ROUTE_CRITERIA = {
+  true: '候选片段与规则存在合理关联，需要核对。',
+  false: '候选片段与规则明显无关。',
+};
+
+// 规则范围与违规定义只在 state 里声明一次，问题里只引用规则编号，
+// 避免每个修改片段都把全部规则文本重复发送一遍。
+function routeRuleCatalog(rules) {
+  return rules.map((rule, index) => ({
+    key: `r${index}`,
+    title: rule.title,
+    scope: rule.scope,
+    violation: rule.violation,
+  }));
+}
+
+function routeQuestion(rule, ruleIndex, hunkRef) {
+  return {
     type: 'noul',
-    instructions: `本次修改是否可能落入规则“${rule.title}”的适用范围，值得进一步核对项目事实？范围：${rule.scope}。违规定义：${rule.violation}。这是召回优先的语义筛选，不要求当前证据足以判违规。`,
-    criteria: { true: '候选片段与规则存在合理关联，需要核对。', false: '候选片段与规则明显无关。' },
-  }]));
+    instructions: `本次修改${hunkRef}是否可能落入 state.rules 中 r${ruleIndex}（${rule.title}）的适用范围？范围与违规定义见 state.rules。这是召回优先的语义筛选，不要求当前证据足以判违规。`,
+    criteria: ROUTE_CRITERIA,
+  };
+}
+
+function routeQuestions(entries) {
+  return Object.fromEntries(entries.map(({ rule, index }) => [`r${index}`, routeQuestion(rule, index, '')]));
+}
+
+// 规则可用 appliesTo 声明适用的文件扩展名；未声明时对所有文件生效。索引保留
+// 在全量规则数组中的位置，所以答案键在两个路径下含义一致。
+function indexedRulesForPath(rules, path) {
+  const extension = extname(path).toLowerCase();
+  return rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => !rule.appliesTo || rule.appliesTo.includes(extension));
+}
+
+// 每个片段的体量只估算一次，再按预算贪心装箱，准备开销与片段数成线性。
+function routePlan(rules, items, request, maxBytes) {
+  const base = JSON.stringify({ user_request: clipTail(request || '', REQUEST_LIMIT), rules: routeRuleCatalog(rules), changes: [] }).length;
+  const batches = [];
+  let current = [];
+  let bytes = base;
+  for (const item of items) {
+    const entry = { key: `h${current.length}`, path: item.change.path, extension: extname(item.change.path).toLowerCase(), change: item.hunk };
+    let cost = JSON.stringify(entry).length;
+    for (const { rule, index } of indexedRulesForPath(rules, item.change.path)) {
+      cost += JSON.stringify(routeQuestion(rule, index, ` h${current.length} `)).length + 16;
+    }
+    if (current.length > 0 && bytes + cost > maxBytes) {
+      batches.push(current);
+      current = [];
+      bytes = base;
+    }
+    current.push(item);
+    bytes += cost;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
 }
 
 export async function semanticRoute(change, hunk, rules, request, ask, signal) {
+  const entries = indexedRulesForPath(rules, change.path);
   const state = {
     path: change.path,
     extension: extname(change.path).toLowerCase(),
     user_request: clipTail(request || '', REQUEST_LIMIT),
+    rules: routeRuleCatalog(rules),
     change: hunk,
   };
-  const response = await ask(state, routeQuestions(rules), { signal });
-  return rules.map((rule, index) => ({ rule, applicability: probability(response, `r${index}`), hunk })).filter(item => item.applicability >= ROUTE_THRESHOLD);
+  const response = await ask(state, routeQuestions(entries), { signal });
+  return entries.map(({ rule, index }) => ({ rule, applicability: probability(response, `r${index}`), hunk })).filter(item => item.applicability >= ROUTE_THRESHOLD);
 }
 
-function judgmentQuestions(rule) {
+async function semanticRouteBatch(items, rules, request, ask, signal) {
+  const state = {
+    user_request: clipTail(request || '', REQUEST_LIMIT),
+    rules: routeRuleCatalog(rules),
+    changes: items.map((item, index) => ({
+      key: `h${index}`,
+      path: item.change.path,
+      extension: extname(item.change.path).toLowerCase(),
+      change: item.hunk,
+    })),
+  };
+  const questions = {};
+  const applicableByItem = items.map(item => indexedRulesForPath(rules, item.change.path));
+  for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+    for (const { rule, index } of applicableByItem[itemIndex]) {
+      questions[`h${itemIndex}_r${index}`] = routeQuestion(rule, index, ` h${itemIndex} `);
+    }
+  }
+  const response = await ask(state, questions, { signal });
+  return items.map((item, itemIndex) => applicableByItem[itemIndex].map(({ rule, index }) => ({
+    rule,
+    applicability: probability(response, `h${itemIndex}_r${index}`),
+    hunk: item.hunk,
+    path: item.change.path,
+  })).filter(result => result.applicability >= ROUTE_THRESHOLD));
+}
+
+function judgmentQuestions(rule, prefix = '') {
   return {
-    violation: {
+    [`${prefix}violation`]: {
       type: 'noul',
       instructions: `结合 state.user_request、state.project_evidence 和 state.change，本次修改是否引入规则“${rule.title}”定义的违规？定义：${rule.violation}。例外：${rule.exceptions.join('；')}。只依据给定项目事实，不用通用偏好补全缺失信息。`,
       criteria: { true: { description: rule.violation, example: rule.bad }, false: { description: '没有违规、符合例外或项目事实支持当前实现', example: rule.good } },
     },
-    evidence_sufficient: {
+    [`${prefix}evidence_sufficient`]: {
       type: 'noul',
       instructions: `给定证据是否足以对规则“${rule.title}”作出结论？需要的证据：${rule.requiredEvidence.join('；')}。state.project_evidence 是当前 LC 按取证请求通过项目工具取得的事实；带路径的需求原文、源码、组件接口、DESIGN.md 条款和页面观察应按其明确内容作为证据，除非彼此矛盾。只检查 required_evidence 是否覆盖，不额外要求规则未列出的材料；仍需猜测时回答否。`,
       criteria: { true: '用户要求、修改片段和项目工具证据已经覆盖 required_evidence，可以支持结论。', false: 'required_evidence 中仍有决定性项目事实缺失或相互矛盾。' },
@@ -227,10 +316,8 @@ function judgmentQuestions(rule) {
   };
 }
 
-export async function judgeWithEvidence(candidate, request, projectEvidence, ask, signal) {
-  const state = {
-    path: candidate.path,
-    user_request: clipTail(request || '', REQUEST_LIMIT),
+function judgmentCandidateBody(candidate, projectEvidence) {
+  return {
     rule: {
       id: candidate.rule.id,
       title: candidate.rule.title,
@@ -240,11 +327,57 @@ export async function judgeWithEvidence(candidate, request, projectEvidence, ask
     change: candidate.hunk,
     project_evidence: projectEvidence.slice(-MAX_EVIDENCE_ITEMS).map(item => ({ tool: item.tool, path: item.path, command: item.command, content: clip(item.content || '', EVIDENCE_LIMIT) })),
   };
-  const response = await ask(state, judgmentQuestions(candidate.rule), { signal });
-  const score = probability(response, 'violation');
-  const sufficient = probability(response, 'evidence_sufficient');
+}
+
+function judgedCandidate(candidate, response, prefix = '') {
+  const score = probability(response, `${prefix}violation`);
+  const sufficient = probability(response, `${prefix}evidence_sufficient`);
   const status = score < candidate.rule.threshold ? 'clear' : sufficient >= REVIEW_THRESHOLD ? 'review' : 'uncertain';
   return { ...candidate, score, sufficient, status, stage: 'judged' };
+}
+
+export async function judgeWithEvidence(candidate, request, projectEvidence, ask, signal) {
+  const state = {
+    path: candidate.path,
+    user_request: clipTail(request || '', REQUEST_LIMIT),
+    ...judgmentCandidateBody(candidate, projectEvidence),
+  };
+  const response = await ask(state, judgmentQuestions(candidate.rule), { signal });
+  return judgedCandidate(candidate, response);
+}
+
+async function judgeBatch(items, request, ask, signal) {
+  const state = {
+    user_request: clipTail(request || '', REQUEST_LIMIT),
+    candidates: items.map((item, index) => ({ key: `c${index}`, path: item.candidate.path, ...judgmentCandidateBody(item.candidate, item.freshEvidence) })),
+  };
+  const questions = {};
+  for (let index = 0; index < items.length; index += 1) {
+    Object.assign(questions, judgmentQuestions(items[index].candidate.rule, `c${index}_`));
+  }
+  const response = await ask(state, questions, { signal });
+  return items.map((item, index) => judgedCandidate(item.candidate, response, `c${index}_`));
+}
+
+// 每个待复核候选的体量只估算一次，再按预算贪心装箱。
+function judgmentPlan(items, request, maxBytes) {
+  const base = JSON.stringify({ user_request: clipTail(request || '', REQUEST_LIMIT), candidates: [] }).length;
+  const batches = [];
+  let current = [];
+  let bytes = base;
+  for (const item of items) {
+    const entry = { key: `c${current.length}`, path: item.candidate.path, ...judgmentCandidateBody(item.candidate, item.freshEvidence) };
+    const cost = JSON.stringify(entry).length + JSON.stringify(judgmentQuestions(item.candidate.rule, `c${current.length}_`)).length + 16;
+    if (current.length > 0 && bytes + cost > maxBytes) {
+      batches.push(current);
+      current = [];
+      bytes = base;
+    }
+    current.push(item);
+    bytes += cost;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
 }
 
 function candidateKey(candidate) {
@@ -255,61 +388,123 @@ function routeKey(change, hunk) {
   return `route:${JSON.stringify([change.path, hunk.changedStartLine, hunk.changedEndLine, hunk.changedAfter])}`;
 }
 
-export async function inspectChanges(changes, rules, request, evidence, rounds, ask, signal) {
-  const routed = []; const errors = []; let routeCalls = 0; let limited = false;
+// 跨轮次审计状态：路由结果按片段缓存，候选取证进度按候选缓存，证据由状态自己持有。
+export function createAuditState() {
+  return { routes: new Map(), candidates: new Map(), evidence: [], dropped: 0 };
+}
+
+function auditCandidate(audit, candidate) {
+  const key = candidateKey(candidate);
+  let entry = audit.candidates.get(key);
+  if (!entry) {
+    entry = { stage: 'awaiting_evidence', evidenceStart: audit.evidence.length, evidenceSignature: '', result: undefined };
+    audit.candidates.set(key, entry);
+  }
+  return entry;
+}
+
+// awaiting_evidence → ready → judged；证据签名未变的已判结果直接复用。
+function candidateProgress(entry, audit) {
+  const fresh = audit.evidence.slice(Math.max(0, entry.evidenceStart - audit.dropped));
+  const signature = JSON.stringify(fresh);
+  if (entry.result && entry.evidenceSignature === signature) return { status: 'judged', result: entry.result };
+  if (fresh.length === 0) return { status: 'awaiting_evidence' };
+  return { status: 'ready', fresh, signature };
+}
+
+export async function inspectChanges(changes, rules, request, audit, ask, signal) {
+  const { requestChars, requestsPerRound } = jevBudget();
+  const routed = []; const errors = []; let routeCalls = 0; let judgmentCalls = 0; let limited = false;
   const rulesById = new Map(rules.map(rule => [rule.id, rule]));
+  const pendingRoutes = [];
   for (const change of changes) {
     const segmented = diffHunks(change.before, change.after);
     limited ||= segmented.limited;
     for (const hunk of segmented.hunks) {
       const key = routeKey(change, hunk);
-      const cached = rounds.get(key);
-      if (cached?.kind === 'route') {
-        routed.push(...cached.selected.map(item => ({ rule: rulesById.get(item.ruleId), applicability: item.applicability, hunk, path: change.path })).filter(item => item.rule));
+      const cached = audit.routes.get(key);
+      if (cached) {
+        routed.push(...cached.map(item => ({ rule: rulesById.get(item.ruleId), applicability: item.applicability, hunk, path: change.path })).filter(item => item.rule));
         continue;
       }
-      if (routeCalls >= MAX_ROUTE_CALLS) { limited = true; break; }
+      pendingRoutes.push({ change, hunk, key });
+    }
+  }
+  if (pendingRoutes.length > 0) {
+    const batches = pendingRoutes.length === 1
+      ? [pendingRoutes]
+      : routePlan(rules, pendingRoutes, request, requestChars);
+    for (const batch of batches) {
+      if (routeCalls >= requestsPerRound) {
+        limited = true;
+        break;
+      }
       try {
-        const selected = await semanticRoute(change, hunk, rules, request, ask, signal);
+        const selectedGroups = batch.length === 1
+          ? [await semanticRoute(batch[0].change, batch[0].hunk, rules, request, ask, signal)]
+          : await semanticRouteBatch(batch, rules, request, ask, signal);
         routeCalls++;
-        rounds.set(key, { kind: 'route', selected: selected.map(item => ({ ruleId: item.rule.id, applicability: item.applicability })) });
-        routed.push(...selected.map(item => ({ ...item, path: change.path })));
+        for (let index = 0; index < batch.length; index++) {
+          const pending = batch[index];
+          const selected = selectedGroups[index] || [];
+          audit.routes.set(pending.key, selected.map(item => ({ ruleId: item.rule.id, applicability: item.applicability })));
+          routed.push(...selected.map(item => ({ ...item, path: pending.change.path })));
+        }
       } catch (error) {
-        errors.push(`${change.path}:${hunk.changedStartLine}-${hunk.changedEndLine}：${error instanceof Error ? error.message : String(error)}`);
+        errors.push(`语义初筛：${error instanceof Error ? error.message : String(error)}`);
+        break;
       }
     }
   }
-  const findings = []; let judgmentCalls = 0;
-  for (const candidate of routed) {
-    const key = candidateKey(candidate);
-    const existing = rounds.get(key);
-    if (!existing) {
-      rounds.set(key, { evidenceStart: evidence.length });
-      findings.push({ ...candidate, status: 'uncertain', stage: 'needs_evidence', requiredEvidence: candidate.rule.requiredEvidence });
+  const needsEvidence = candidate => ({ ...candidate, status: 'uncertain', stage: 'needs_evidence', requiredEvidence: candidate.rule.requiredEvidence });
+  const findings = new Array(routed.length);
+  const pendingJudgments = [];
+  for (let index = 0; index < routed.length; index += 1) {
+    const candidate = routed[index];
+    const entry = auditCandidate(audit, candidate);
+    const progress = candidateProgress(entry, audit);
+    if (progress.status === 'judged') {
+      findings[index] = progress.result;
       continue;
     }
-    const freshEvidence = evidence.slice(existing.evidenceStart);
-    const evidenceSignature = JSON.stringify(freshEvidence);
-    if (existing.result && existing.evidenceSignature === evidenceSignature) {
-      findings.push(existing.result);
+    if (progress.status === 'awaiting_evidence') {
+      entry.stage = 'awaiting_evidence';
+      findings[index] = needsEvidence(candidate);
       continue;
     }
-    if (!freshEvidence.length || judgmentCalls >= MAX_JUDGMENT_CALLS) {
-      if (judgmentCalls >= MAX_JUDGMENT_CALLS) limited = true;
-      findings.push({ ...candidate, status: 'uncertain', stage: 'needs_evidence', requiredEvidence: candidate.rule.requiredEvidence });
-      continue;
+    pendingJudgments.push({ index, candidate, entry, evidenceSignature: progress.signature, freshEvidence: progress.fresh });
+  }
+  if (pendingJudgments.length > 0) {
+    const batches = pendingJudgments.length === 1 ? [pendingJudgments] : judgmentPlan(pendingJudgments, request, requestChars);
+    const runnable = batches.slice(0, Math.max(0, requestsPerRound - routeCalls));
+    if (runnable.length < batches.length) {
+      limited = true;
+      for (const batch of batches.slice(runnable.length)) {
+        for (const item of batch) findings[item.index] = needsEvidence(item.candidate);
+      }
     }
-    try {
-      const judged = await judgeWithEvidence(candidate, request, freshEvidence, ask, signal);
-      existing.result = judged;
-      existing.evidenceSignature = evidenceSignature;
-      findings.push(judged);
-      judgmentCalls++;
-    } catch (error) {
-      errors.push(`${candidate.path}:${candidate.hunk.changedStartLine}-${candidate.hunk.changedEndLine} [${candidate.rule.id}]：${error instanceof Error ? error.message : String(error)}`);
+    for (const batch of runnable) {
+      try {
+        const judged = batch.length === 1
+          ? [await judgeWithEvidence(batch[0].candidate, request, batch[0].freshEvidence, ask, signal)]
+          : await judgeBatch(batch, request, ask, signal);
+        judgmentCalls += 1;
+        for (let position = 0; position < batch.length; position += 1) {
+          const item = batch[position];
+          item.entry.stage = 'judged';
+          item.entry.result = judged[position];
+          item.entry.evidenceSignature = item.evidenceSignature;
+          findings[item.index] = judged[position];
+        }
+      } catch (error) {
+        for (const item of batch) {
+          errors.push(`${item.candidate.path}:${item.candidate.hunk.changedStartLine}-${item.candidate.hunk.changedEndLine} [${item.candidate.rule.id}]：${error instanceof Error ? error.message : String(error)}`);
+        }
+        break;
+      }
     }
   }
-  return { findings, errors, routeCalls, judgmentCalls, limited, checkedFiles: changes.length };
+  return { findings: findings.filter(Boolean), errors, routeCalls, judgmentCalls, limited, checkedFiles: changes.length };
 }
 
 export function formatReport(result, phase, notes = []) {
@@ -355,15 +550,14 @@ export function proposedContent(before, input, tool) {
 
 export function registerAntiSlop(pi, ask, { rulesPath = RULES_PATH } = {}) {
   let request = '';
-  let evidence = [];
   let tracked = new Map();
   let pendingTrack = new Map();
-  let rounds = new Map();
+  let audit = createAuditState();
   let workspaceBaseline;
   let baselinePromise;
   let lastReport = '';
   let automaticReviewTurns = 0;
-  const reset = () => { request = ''; evidence = []; tracked = new Map(); pendingTrack = new Map(); rounds = new Map(); workspaceBaseline = undefined; baselinePromise = undefined; lastReport = ''; automaticReviewTurns = 0; };
+  const reset = () => { request = ''; tracked = new Map(); pendingTrack = new Map(); audit = createAuditState(); workspaceBaseline = undefined; baselinePromise = undefined; lastReport = ''; automaticReviewTurns = 0; };
   const enabled = () => process.env.TYPESAFE_ANTI_SLOP_DISABLE !== '1';
   const publish = (text, triggerTurn) => pi.sendMessage({ customType: 'anti-ai-slop', content: text, display: false }, { triggerTurn, deliverAs: 'followUp' });
   const ensureBaseline = cwd => baselinePromise ??= captureWorkspaceBaseline(cwd).then(value => workspaceBaseline = value);
@@ -401,8 +595,12 @@ export function registerAntiSlop(pi, ask, { rulesPath = RULES_PATH } = {}) {
     if (readOnlyEvidence && !event.isError) {
       const text = event.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
       if (text) {
-        evidence.push({ tool: event.toolName, path: event.input.path, command: event.input.command, content: clip(text, EVIDENCE_LIMIT) });
-        if (evidence.length > 20) evidence.shift();
+        audit.evidence.push({ tool: event.toolName, path: event.input.path, command: event.input.command, content: clip(text, EVIDENCE_LIMIT) });
+        // 头部丢弃时记录偏移，已登记的 evidenceStart 下标仍然指向正确的证据。
+        while (audit.evidence.length > MAX_EVIDENCE_STORE) {
+          audit.evidence.shift();
+          audit.dropped += 1;
+        }
       }
     }
   });
@@ -423,7 +621,7 @@ export function registerAntiSlop(pi, ask, { rulesPath = RULES_PATH } = {}) {
       changes = [...known.values()].filter(change => selected.has(change.path));
     }
     const rules = loadRules(rulesPath);
-    return inspectChanges(changes, rules, request, evidence, rounds, ask, ctx.signal);
+    return inspectChanges(changes, rules, request, audit, ask, ctx.signal);
   }
 
   pi.on('agent_settled', async (_event, ctx) => {
