@@ -464,7 +464,7 @@ function statusText(decision: PreflightDecision): string {
 }
 
 function debugLog(message: string): void {
-	if (debugEnabled) console.error(`[typesafe-guard] ${message}`);
+	if (debugEnabled) console.error(`[lystar-jev-guard] ${message}`);
 }
 
 function notify(ctx: { hasUI: boolean; ui: { notify(message: string, type?: "info" | "warning" | "error"): void } }, message: string, type: "info" | "warning" | "error"): void {
@@ -472,7 +472,7 @@ function notify(ctx: { hasUI: boolean; ui: { notify(message: string, type?: "inf
 	else debugLog(message);
 }
 
-export default function typesafeGuard(pi: ExtensionAPI): void {
+export default function lystarJevGuard(pi: ExtensionAPI): void {
 	debugEnabled = process.env.TYPESAFE_GUARD_DEBUG === "1";
 
 	pi.on("before_agent_start", (event) => {
@@ -511,7 +511,7 @@ export default function typesafeGuard(pi: ExtensionAPI): void {
 		} catch {
 			// JEV is a workflow signal, not the permission boundary. API failure never
 			// blocks the user's normal coding path.
-			if (ctx.hasUI) ctx.ui.setStatus("typesafe-guard", "Jev 不可用 · 已按回退策略放行");
+			if (ctx.hasUI) ctx.ui.setStatus("lystar-jev-guard", "Jev 不可用 · 已按回退策略放行");
 			notify(ctx, "Jev 不可用，已按回退策略放行当前工具调用", "warning");
 			return;
 		} finally {
@@ -527,7 +527,7 @@ export default function typesafeGuard(pi: ExtensionAPI): void {
 			`model=${decision.model || "unknown"} latency_ms=${decision.latencyMs}`,
 		);
 
-		if (ctx.hasUI) ctx.ui.setStatus("typesafe-guard", statusText(decision));
+		if (ctx.hasUI) ctx.ui.setStatus("lystar-jev-guard", statusText(decision));
 		if (decision.status === "advisory") {
 			notify(
 				ctx,
@@ -559,7 +559,7 @@ export default function typesafeGuard(pi: ExtensionAPI): void {
 		cache = new Map();
 		if (!event.isError) return;
 		debugLog(`execution_failed tool=${event.toolName}`);
-		if (ctx.hasUI) ctx.ui.setStatus("typesafe-guard", `工具执行失败（真实返回）· ${event.toolName}`);
+		if (ctx.hasUI) ctx.ui.setStatus("lystar-jev-guard", `工具执行失败（真实返回）· ${event.toolName}`);
 	});
 
 }

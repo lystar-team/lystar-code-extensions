@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerHooks } from 'node:module';
-import { loadRules, captureWorkspaceBaseline, collectFinalChanges, diffHunks, semanticRoute, judgeWithEvidence, inspectChanges, formatReport, needsAttention, proposedContent, registerAntiSlop } from '../extensions/typesafe-anti-slop/anti-slop.mjs';
+import { loadRules, captureWorkspaceBaseline, collectFinalChanges, diffHunks, semanticRoute, judgeWithEvidence, inspectChanges, formatReport, needsAttention, proposedContent, registerAntiSlop } from '../extensions/lystar-jev-anti-slop/anti-slop.mjs';
 
 const rules = loadRules();
 const rule = id => rules.find(item => item.id === id);
@@ -227,13 +227,13 @@ test('规则停用开关不运行审计', async () => {
 });
 
 registerHooks({ resolve(specifier, context, nextResolve) {
-  if (specifier.endsWith('.js') && context.parentURL?.endsWith('/typesafe-guard.ts')) {
+  if (specifier.endsWith('.js') && context.parentURL?.endsWith('/lystar-jev-guard.ts')) {
     const candidate = new URL(specifier.slice(0, -3) + '.ts', context.parentURL);
     if (existsSync(candidate)) return nextResolve(candidate.href, context);
   }
   return nextResolve(specifier, context);
 } });
-const guard = await import('../extensions/typesafe-guard.ts');
+const guard = await import('../extensions/lystar-jev-guard.ts');
 test('Guard 只注册工具预检，不绑定会话压缩和 anti-ai-slop', () => {
   const handlers = new Map(); const commands = [];
   guard.default({ on(name, handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); }, registerCommand(name) { commands.push(name); } });

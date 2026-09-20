@@ -809,7 +809,7 @@ export async function compactSession(params: {
 
 	const candidatesForDetails = decisions.filter((decision) => decision.reason !== "pinned");
 	const detail = {
-		version: "typesafe-guard-jev-compaction-2",
+		version: "lystar-jev-compaction-2",
 		oldMessages: transcript.oldCount,
 		keptMessages: transcript.messages.length - transcript.oldCount,
 		oldCharsBefore: serialized.charsBefore,

@@ -6,10 +6,10 @@
 
 | Extension | 默认加载 | 责任 |
 | --- | --- | --- |
-| `typesafe-guard` | 是 | 工具调用前的 Jev 预检、高影响操作确认和工具失败状态提示 |
-| `typesafe-compaction` | 是 | 会话压缩和压缩失败回退 |
-| `typesafe-skill-planner` | 是 | 根据当前请求选择 Skill，确定回复形态和本轮响应指导 |
-| `typesafe-anti-slop` | 否 | 变更复核；需要配合项目 Skill 和规则文件使用 |
+| `lystar-jev-guard` | 是 | 工具调用前的 Jev 预检、高影响操作确认和工具失败状态提示 |
+| `lystar-jev-compaction` | 是 | 会话压缩和压缩失败回退 |
+| `lystar-jev-skill-planner` | 是 | 根据当前请求选择 Skill，确定回复形态和本轮响应指导 |
+| `lystar-jev-anti-slop` | 否 | 变更复核；需要配合项目 Skill 和规则文件使用 |
 
 每个 Extension 都有独立入口和事件边界。Guard 不注册会话压缩，也不注册 anti-ai-slop；Compaction 不参与工具预检；anti-ai-slop 不会随默认包自动启用。
 
@@ -23,16 +23,16 @@ pi install git:github.com/lystar-team/lystar-code-extensions@v0.1.0
 
 默认加载：
 
-- `typesafe-guard`
-- `typesafe-compaction`
-- `typesafe-skill-planner`
+- `lystar-jev-guard`
+- `lystar-jev-compaction`
+- `lystar-jev-skill-planner`
 
 ## 单独试用
 
 ```bash
-pi -e ./extensions/typesafe-guard.ts
-pi -e ./extensions/typesafe-compaction.ts
-pi -e ./extensions/typesafe-skill-planner.ts
+pi -e ./extensions/lystar-jev-guard.ts
+pi -e ./extensions/lystar-jev-compaction.ts
+pi -e ./extensions/lystar-jev-skill-planner.ts
 ```
 
 ## 选装 anti-ai-slop
@@ -42,7 +42,7 @@ anti-ai-slop 是选装的变更复核 Extension，不属于默认加载链路，
 从当前仓库源码试用：
 
 ```bash
-pi -e ./extensions/typesafe-anti-slop.ts
+pi -e ./extensions/lystar-jev-anti-slop.ts
 ```
 
 规则文件位于 `rules/anti-ai-slop.rules.json`，可以通过 `TYPESAFE_ANTI_SLOP_RULES_PATH` 指定规则文件。该 Extension 与默认组件包分开维护。
@@ -96,7 +96,7 @@ Key 文件只保存一行 Key。Extension 不会创建、修改或上传这个�
 
 ## 运行行为
 
-### typesafe-guard
+### lystar-jev-guard
 
 Guard 默认跳过只读工具和只读 Shell 命令。写文件、编辑文件以及非只读命令会进入 Jev 预检。
 
@@ -107,19 +107,19 @@ Guard 默认跳过只读工具和只读 Shell 命令。写文件、编辑文件�
 
 Jev 请求失败、超时或没有 API Key 时，Guard 不阻断普通开发流程。高影响操作在无 UI 模式下无法弹出确认，会被阻断并返回原因。
 
-### typesafe-compaction
+### lystar-jev-compaction
 
 Compaction 只监听 `session_before_compact`。它使用独立配置和独立日志，不参与工具调用预检。
 
 Jev 请求失败、超时、没有 API Key 或压缩结果无法使用时，Extension 返回明确回退原因，由 Pi 使用原生压缩流程。错误工具结果和受保护的写操作不会被 Jev 删除。
 
-### typesafe-skill-planner
+### lystar-jev-skill-planner
 
 Planner 只追加本轮响应指导，不修改 Skill 内容，也不替代 Pi 的 Skill 发现机制。
 
 没有 API Key、请求失败或 Extension 被关闭时，Planner 不追加指导，主流程继续运行。用户在请求中显式指定的 Skill 会保留在计划中。计划只影响当前请求；Session 切换时会清理上一轮计划。
 
-### typesafe-anti-slop
+### lystar-jev-anti-slop
 
 anti-ai-slop 使用 `agent_settled` 复核最终变更，并注册 `/slop-check` 手动检查命令。它只在被显式加载时运行。
 
@@ -157,14 +157,14 @@ npm run pack:check
 
 ```text
 extensions/
-├── typesafe-guard.ts
-├── typesafe-compaction.ts
-├── typesafe-skill-planner.ts
-├── typesafe-anti-slop.ts
+├── lystar-jev-guard.ts
+├── lystar-jev-compaction.ts
+├── lystar-jev-skill-planner.ts
+├── lystar-jev-anti-slop.ts
 ├── typesafe-core.mjs
-├── typesafe-compaction/
+├── lystar-jev-compaction/
 │   └── compaction.ts
-└── typesafe-anti-slop/
+└── lystar-jev-anti-slop/
     └── anti-slop.mjs
 ```
 

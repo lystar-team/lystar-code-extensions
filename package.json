@@ -10,10 +10,10 @@
   "keywords": ["pi-package", "pi-extension", "typesafe", "coding-agent"],
   "files": [
     "extensions/typesafe-core.mjs",
-    "extensions/typesafe-guard.ts",
-    "extensions/typesafe-compaction.ts",
-    "extensions/typesafe-compaction",
-    "extensions/typesafe-skill-planner.ts",
+    "extensions/lystar-jev-guard.ts",
+    "extensions/lystar-jev-compaction.ts",
+    "extensions/lystar-jev-compaction",
+    "extensions/lystar-jev-skill-planner.ts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -37,9 +37,9 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/typesafe-guard.ts",
-      "./extensions/typesafe-compaction.ts",
-      "./extensions/typesafe-skill-planner.ts"
+      "./extensions/lystar-jev-guard.ts",
+      "./extensions/lystar-jev-compaction.ts",
+      "./extensions/lystar-jev-skill-planner.ts"
     ]
   }
 }

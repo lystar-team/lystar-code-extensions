@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveApiKey } from "./typesafe-core.mjs";
-import { compactSession, defaultCompactionConfig } from "./typesafe-compaction/compaction.js";
+import { compactSession, defaultCompactionConfig } from "./lystar-jev-compaction/compaction.js";
 
 type ContextWindowContext = {
 	model?: { contextWindow?: unknown };
@@ -13,7 +13,7 @@ let debugEnabled = false;
 let lastKnownContextWindow: number | undefined;
 
 function debugLog(message: string): void {
-	if (debugEnabled) console.error(`[typesafe-compaction] ${message}`);
+	if (debugEnabled) console.error(`[lystar-jev-compaction] ${message}`);
 }
 
 function notify(ctx: ContextWindowContext, message: string, type: "info" | "warning" | "error"): void {
@@ -37,7 +37,7 @@ function rememberContextWindow(ctx: ContextWindowContext): void {
 	if (value) lastKnownContextWindow = value;
 }
 
-export default function typesafeCompaction(pi: ExtensionAPI): void {
+export default function lystarJevCompaction(pi: ExtensionAPI): void {
 	debugEnabled = process.env.TYPESAFE_COMPACTION_DEBUG === "1";
 
 	pi.on("before_agent_start", (_event, ctx) => {

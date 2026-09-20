@@ -81,7 +81,7 @@ function escapeXml(value: string): string {
 }
 
 function debugLog(message: string): void {
-	if (debugEnabled) console.error(`[typesafe-skill-planner] ${message}`);
+	if (debugEnabled) console.error(`[lystar-jev-skill-planner] ${message}`);
 }
 
 function extractExplicitSkillNames(prompt: string): string[] {
@@ -302,7 +302,7 @@ async function planTurn(event: BeforeAgentStartEvent): Promise<SkillPlan> {
 	return createPlan(state, candidates, result.response, result.latencyMs);
 }
 
-export default function typesafeSkillPlanner(pi: ExtensionAPI): void {
+export default function lystarJevSkillPlanner(pi: ExtensionAPI): void {
 	debugEnabled = process.env.TYPESAFE_SKILL_PLANNER_DEBUG === "1";
 
 	pi.on("session_start", () => {
@@ -328,7 +328,7 @@ export default function typesafeSkillPlanner(pi: ExtensionAPI): void {
 			);
 			if (ctx.hasUI && process.env.TYPESAFE_SKILL_PLANNER_STATUS === "1") {
 				const names = plan.selected.map((skill) => skill.name).join(", ") || "无";
-				ctx.ui.setStatus("typesafe-skill-planner", `Jev Skill：${names}`);
+				ctx.ui.setStatus("lystar-jev-skill-planner", `Jev Skill：${names}`);
 			}
 			return { systemPrompt: `${event.systemPrompt}\n${guidance}` };
 		} catch (error) {

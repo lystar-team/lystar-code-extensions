@@ -14,10 +14,10 @@ registerHooks({
 });
 
 test('四个 Extension 都能独立加载并注册各自事件', async () => {
-  const guard = await import('../extensions/typesafe-guard.ts');
-  const compaction = await import('../extensions/typesafe-compaction.ts');
-  const planner = await import('../extensions/typesafe-skill-planner.ts');
-  const antiSlop = await import('../extensions/typesafe-anti-slop.ts');
+  const guard = await import('../extensions/lystar-jev-guard.ts');
+  const compaction = await import('../extensions/lystar-jev-compaction.ts');
+  const planner = await import('../extensions/lystar-jev-skill-planner.ts');
+  const antiSlop = await import('../extensions/lystar-jev-anti-slop.ts');
   const guardEvents = new Map();
   const compactionEvents = new Map();
   const plannerEvents = new Map();
