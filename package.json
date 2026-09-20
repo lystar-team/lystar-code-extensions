@@ -9,8 +9,11 @@
   },
   "keywords": ["pi-package", "pi-extension", "typesafe", "coding-agent"],
   "files": [
-    "extensions",
-    "rules",
+    "extensions/typesafe-core.mjs",
+    "extensions/typesafe-guard.ts",
+    "extensions/typesafe-compaction.ts",
+    "extensions/typesafe-compaction",
+    "extensions/typesafe-skill-planner.ts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -35,6 +38,7 @@
   "pi": {
     "extensions": [
       "./extensions/typesafe-guard.ts",
+      "./extensions/typesafe-compaction.ts",
       "./extensions/typesafe-skill-planner.ts"
     ]
   }

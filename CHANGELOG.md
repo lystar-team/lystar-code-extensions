@@ -1,5 +1,12 @@
 # 变更记录
 
+## 未发布
+
+- 将 `typesafe-guard`、`typesafe-compaction`、`typesafe-skill-planner` 和 `typesafe-anti-slop` 拆成独立入口。
+- 将会话压缩从 Guard 移出，默认包只加载 Guard、Compaction 和 Skill Planner。
+- 将 anti-ai-slop 改为选装的个人工作流 Extension，不再由 Guard 自动注册。
+- 增加四个 Extension 的组合加载边界测试。
+
 ## 0.1.0 - 2026-09-20
 
 - 首次整理 `typesafe-guard` 和 `typesafe-skill-planner` 为 Pi Package。

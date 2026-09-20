@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerHooks } from 'node:module';
-import { loadRules, captureWorkspaceBaseline, collectFinalChanges, diffHunks, semanticRoute, judgeWithEvidence, inspectChanges, formatReport, needsAttention, proposedContent, registerAntiSlop } from '../extensions/typesafe-guard/anti-slop.mjs';
+import { loadRules, captureWorkspaceBaseline, collectFinalChanges, diffHunks, semanticRoute, judgeWithEvidence, inspectChanges, formatReport, needsAttention, proposedContent, registerAntiSlop } from '../extensions/typesafe-anti-slop/anti-slop.mjs';
 
 const rules = loadRules();
 const rule = id => rules.find(item => item.id === id);
@@ -234,13 +234,15 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 } });
 const guard = await import('../extensions/typesafe-guard.ts');
-test('现有扩展保留工具预检和压缩，并注册稳定结束审计', () => {
+test('Guard 只注册工具预检，不绑定会话压缩和 anti-ai-slop', () => {
   const handlers = new Map(); const commands = [];
   guard.default({ on(name, handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); }, registerCommand(name) { commands.push(name); } });
-  assert.equal(handlers.get('tool_call').length, 2);
-  assert.equal(handlers.get('agent_settled').length, 1);
-  assert.equal(handlers.get('session_before_compact').length, 1);
-  assert(commands.includes('slop-check'));
+  assert.equal(handlers.get('tool_call').length, 1);
+  assert.equal(handlers.get('tool_result').length, 1);
+  assert.equal(handlers.get('before_agent_start').length, 1);
+  assert.equal(handlers.has('session_before_compact'), false);
+  assert.equal(handlers.has('agent_settled'), false);
+  assert.deepEqual(commands, []);
 });
 test('共享 API 请求沿用模型及凭据配置', async () => {
   const originalFetch = globalThis.fetch;

@@ -6,7 +6,7 @@ Pi Extension 在 Pi 进程内运行，拥有启动 Pi 的用户权限。它不�
 
 ## 发送到 TypeSafe API 的内容
 
-两个 Extension 为完成判断，可能发送：
+各个已启用的 Extension 为完成判断，可能发送：
 
 - 用户请求；
 - 工作目录和文件路径；
@@ -37,7 +37,7 @@ export TYPESAFE_COMPACTION_DISABLE=1
 export TYPESAFE_ANTI_SLOP_DISABLE=1
 ```
 
-当前版本的 Guard 使用 `TYPESAFE_GUARD_DISABLE` 时跳过工具预检；会话压缩、Skill Planner 和 anti-ai-slop 使用各自的开关。
+四个开关分别作用于四个 Extension。Guard、Compaction 和 Skill Planner 的默认入口会随包加载；anti-ai-slop 必须显式加载后才会参与会话。
 
 ## 报告漏洞
 

@@ -1,30 +1,53 @@
 # LYStar Code Extensions
 
-面向 Pi coding agent 的 TypeSafe 扩展集合。
+面向 Pi coding agent 的 TypeSafe Extension 集合。
 
-当前包含两个 Extension：
+## 组件边界
 
-| Extension | 作用 |
-| --- | --- |
-| `typesafe-guard` | 在工具调用前进行 Jev 预检，处理高影响操作确认，提供 Jev 会话压缩，并按规则复核最终代码变更 |
-| `typesafe-skill-planner` | 根据当前请求和已加载 Skill 选择需要读取的 Skill，确定回复形态和表达约束 |
+| Extension | 默认加载 | 责任 |
+| --- | --- | --- |
+| `typesafe-guard` | 是 | 工具调用前的 Jev 预检、高影响操作确认和工具失败状态提示 |
+| `typesafe-compaction` | 是 | 会话压缩和压缩失败回退 |
+| `typesafe-skill-planner` | 是 | 根据当前请求选择 Skill，确定回复形态和本轮响应指导 |
+| `typesafe-anti-slop` | 否 | 个人使用的 anti-ai-slop 变更复核；需要配合项目 Skill 和规则文件使用 |
 
-## 安装
+每个 Extension 都有独立入口和事件边界。Guard 不注册会话压缩，也不注册 anti-ai-slop；Compaction 不参与工具预检；anti-ai-slop 不会随默认包自动启用。
 
-从 Git 仓库安装：
+共享请求、凭据、模型和地址配置位于 [`extensions/typesafe-core.mjs`](extensions/typesafe-core.mjs)。共享模块不是独立 Extension，不直接注册 Pi 事件。
+
+## 安装默认组件
 
 ```bash
 pi install git:github.com/lystar-team/lystar-code-extensions@v0.1.0
 ```
 
-试用本地源码：
+默认加载：
+
+- `typesafe-guard`
+- `typesafe-compaction`
+- `typesafe-skill-planner`
+
+## 单独试用
 
 ```bash
 pi -e ./extensions/typesafe-guard.ts
+pi -e ./extensions/typesafe-compaction.ts
 pi -e ./extensions/typesafe-skill-planner.ts
 ```
 
-安装后可在 Pi 的扩展列表中确认两个 Extension 已加载。Extension 运行在 Pi 进程内，拥有 Pi 进程的文件、命令和网络权限；安装前应审阅源码。
+## 选装 anti-ai-slop
+
+anti-ai-slop 是个人工作流 Extension，不属于默认加载链路，也不进入公开包归档。它依赖项目中的 Skill、规则文件和业务取证流程，不应当被当成通用 Guard 能力。
+
+从当前仓库源码试用：
+
+```bash
+pi -e ./extensions/typesafe-anti-slop.ts
+```
+
+规则文件位于 `rules/anti-ai-slop.rules.json`，可以通过 `TYPESAFE_ANTI_SLOP_RULES_PATH` 指向个人规则文件。后续若需要让其他用户独立安装，应把它整理为单独的 Pi Package 或独立仓库，不把个人规则并入默认组件包。
+
+anti-ai-slop 不会修改规则、不自动阻断工具调用，也不会代替项目 Skill 的业务判断。
 
 ## API 配置
 
@@ -58,17 +81,18 @@ Key 文件只保存一行 Key。Extension 不会创建、修改或上传这个�
 | `TYPESAFE_REQUEST_TIMEOUT_MS` | 共享请求超时 | `1800` |
 | `TYPESAFE_GUARD_TIMEOUT_MS` | Guard 预检超时 | `1800` |
 | `TYPESAFE_SKILL_PLANNER_TIMEOUT_MS` | Skill Planner 请求超时 | `1800` |
-| `TYPESAFE_COMPACTION_TIMEOUT_MS` | 会话压缩请求超时 | `12000` |
+| `TYPESAFE_COMPACTION_TIMEOUT_MS` | Compaction 请求超时 | `12000` |
+| `TYPESAFE_ANTI_SLOP_TIMEOUT_MS` | anti-ai-slop 请求超时 | `8000` |
 | `TYPESAFE_GUARD_DEBUG` | 输出 Guard 调试日志 | `0` |
+| `TYPESAFE_COMPACTION_DEBUG` | 输出 Compaction 调试日志 | `0` |
 | `TYPESAFE_SKILL_PLANNER_DEBUG` | 输出 Planner 调试日志 | `0` |
 | `TYPESAFE_DEBUG` | 输出共享客户端调试信息 | `0` |
 | `TYPESAFE_GUARD_DISABLE` | 关闭 Guard 工具预检 | `0` |
 | `TYPESAFE_COMPACTION_DISABLE` | 关闭 Jev 会话压缩 | `0` |
 | `TYPESAFE_SKILL_PLANNER_DISABLE` | 关闭 Skill Planner | `0` |
 | `TYPESAFE_SKILL_PLANNER_STATUS` | 在 Pi 状态栏显示选中的 Skill | `0` |
-| `TYPESAFE_ANTI_SLOP_DISABLE` | 关闭最终变更规则复核 | `0` |
-| `TYPESAFE_ANTI_SLOP_RULES_PATH` | 自定义 anti-ai-slop 规则文件 | 包内默认规则 |
-| `TYPESAFE_ANTI_SLOP_TIMEOUT_MS` | anti-ai-slop 请求超时 | `8000` |
+| `TYPESAFE_ANTI_SLOP_DISABLE` | 关闭 anti-ai-slop | `0` |
+| `TYPESAFE_ANTI_SLOP_RULES_PATH` | 自定义 anti-ai-slop 规则文件 | 包内规则文件 |
 
 ## 运行行为
 
@@ -81,23 +105,25 @@ Guard 默认跳过只读工具和只读 Shell 命令。写文件、编辑文件�
 - 操作属于高影响操作，例如访问工作目录外路径、`sudo`、`ssh`、`scp`、强制删除、`git push` 或服务重启；
 - Jev 判断需要确认，或判断任务关联度很低且操作明显越界。
 
-Jev 请求失败、超时、没有 API Key 或响应无法使用时，Guard 不阻断普通开发流程。高影响操作在无 UI 模式下无法弹出确认，会被阻断并返回原因。
+Jev 请求失败、超时或没有 API Key 时，Guard 不阻断普通开发流程。高影响操作在无 UI 模式下无法弹出确认，会被阻断并返回原因。
 
-会话压缩失败时，Extension 返回明确回退原因，由 Pi 使用原生压缩流程。错误工具结果和受保护的写操作不会被 Jev 删除。
+### typesafe-compaction
+
+Compaction 只监听 `session_before_compact`。它使用独立配置和独立日志，不参与工具调用预检。
+
+Jev 请求失败、超时、没有 API Key 或压缩结果无法使用时，Extension 返回明确回退原因，由 Pi 使用原生压缩流程。错误工具结果和受保护的写操作不会被 Jev 删除。
 
 ### typesafe-skill-planner
 
 Planner 只追加本轮响应指导，不修改 Skill 内容，也不替代 Pi 的 Skill 发现机制。
 
-没有 API Key、请求失败或 Extension 被关闭时，Planner 不追加指导，主流程继续运行。
+没有 API Key、请求失败或 Extension 被关闭时，Planner 不追加指导，主流程继续运行。用户在请求中显式指定的 Skill 会保留在计划中。计划只影响当前请求；Session 切换时会清理上一轮计划。
 
-用户在请求中显式指定的 Skill 会保留在计划中。计划只影响当前请求；Session 切换时会清理上一轮计划。
+### typesafe-anti-slop
 
-### anti-ai-slop
+anti-ai-slop 使用 `agent_settled` 复核最终变更，并注册 `/slop-check` 手动检查命令。它只在被显式加载时运行。
 
-Guard 内置最终变更复核流程。默认规则随包分发在 `rules/anti-ai-slop.rules.json`，可以通过 `TYPESAFE_ANTI_SLOP_RULES_PATH` 指向兼容的自定义规则文件。
-
-规则只产生复核提示，不自动阻断工具调用。证据不足时保持待取证状态，不凭通用偏好修改代码。
+规则只产生复核提示，不自动阻断工具调用。证据不足时保持待取证状态，不凭通用偏好修改代码。这个 Extension 面向 Yean 的个人 Skill 工作流，规则、业务取证和项目上下文需要由使用者自行维护。
 
 ## 数据发送范围
 
@@ -126,6 +152,21 @@ npm run pack:check
 ```
 
 测试使用本地 Mock，不连接真实 TypeSafe API，不需要真实 API Key。
+
+## 目录结构
+
+```text
+extensions/
+├── typesafe-guard.ts
+├── typesafe-compaction.ts
+├── typesafe-skill-planner.ts
+├── typesafe-anti-slop.ts
+├── typesafe-core.mjs
+├── typesafe-compaction/
+│   └── compaction.ts
+└── typesafe-anti-slop/
+    └── anti-slop.mjs
+```
 
 ## 版本与发布
 

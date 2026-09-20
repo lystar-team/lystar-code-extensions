@@ -14,12 +14,14 @@ npm ci
 
 ## 修改范围
 
-- `typesafe-guard` 负责工具预检、确认、会话压缩和最终变更复核。
-- `typesafe-skill-planner` 负责 Skill 选择和本轮响应指导。
+- `typesafe-guard` 只负责工具预检、确认和工具失败状态。
+- `typesafe-compaction` 只负责会话压缩。
+- `typesafe-skill-planner` 只负责 Skill 选择和本轮响应指导。
+- `typesafe-anti-slop` 是选装的个人工作流 Extension，不进入默认加载链路。
 - `extensions/typesafe-core.mjs` 是共享 API、凭据和配置事实源。
-- `rules/anti-ai-slop.rules.json` 只保存规则数据，不在检查器中复制规则。
+- `rules/anti-ai-slop.rules.json` 只保存可选规则数据，不在检查器中复制规则。
 
-共享配置、TypeSafe 请求格式和错误处理发生变化时，必须同时更新对应测试、README 和 CHANGELOG。
+共享配置、TypeSafe 请求格式和错误处理发生变化时，必须同时更新对应测试、README 和 CHANGELOG。Extension 事件边界发生变化时，必须更新组合加载测试。
 
 不要提交：
 

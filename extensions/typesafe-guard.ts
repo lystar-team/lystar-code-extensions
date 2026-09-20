@@ -5,8 +5,6 @@ import type {
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import { envNumber, requestTypeSafe, resolveApiKey, typeSafeModel } from "./typesafe-core.mjs";
-import { compactSession, defaultCompactionConfig } from "./typesafe-guard/compaction.js";
-import { registerAntiSlop } from "./typesafe-guard/anti-slop.mjs";
 
 type NoulAnswer = {
 	type: "noul";
@@ -47,7 +45,6 @@ const SAFE_STDERR_REDIRECT = /\s+2\s*>\s*\/dev\/null\s*$/i;
 let currentPrompt = "";
 let warnedMissingKey = false;
 let debugEnabled = false;
-let lastKnownContextWindow: number | undefined;
 let cache = new Map<string, Promise<PreflightDecision>>();
 
 function clip(value: string, max: number): string {
@@ -70,11 +67,6 @@ function safeJson(value: unknown, max: number): string {
 	}
 }
 
-type ContextWindowContext = {
-	model?: { contextWindow?: unknown };
-	getContextUsage?: () => { contextWindow?: unknown } | undefined;
-};
-
 type SessionContext = {
 	sessionManager?: {
 		getBranch?: () => readonly unknown[];
@@ -87,17 +79,6 @@ type ExecutionContext = {
 	recentActivity: string[];
 	branchLeafId: string;
 };
-
-function observedContextWindow(ctx: ContextWindowContext): number | undefined {
-	try {
-		const direct = ctx.model?.contextWindow;
-		const usage = ctx.getContextUsage?.()?.contextWindow;
-		const value = direct ?? usage;
-		return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-	} catch {
-		return undefined;
-	}
-}
 
 type ShellSplitResult = {
 	segments: string[];
@@ -493,20 +474,14 @@ function notify(ctx: { hasUI: boolean; ui: { notify(message: string, type?: "inf
 
 export default function typesafeGuard(pi: ExtensionAPI): void {
 	debugEnabled = process.env.TYPESAFE_GUARD_DEBUG === "1";
-	registerAntiSlop(pi, (state: unknown, questions: Record<string, unknown>, options: { signal?: AbortSignal } = {}) =>
-		requestSystemOne(state, questions, { ...options, timeoutMs: envNumber("TYPESAFE_ANTI_SLOP_TIMEOUT_MS", 8000) }),
-	);
 
-	pi.on("before_agent_start", (event, ctx) => {
+	pi.on("before_agent_start", (event) => {
 		currentPrompt = event.prompt;
 		cache = new Map();
-		lastKnownContextWindow = observedContextWindow(ctx);
 	});
 
 	pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
 		if (process.env.TYPESAFE_GUARD_DISABLE === "1") return;
-		const contextWindow = observedContextWindow(ctx);
-		if (contextWindow) lastKnownContextWindow = contextWindow;
 		if (!shouldPreflight(event.toolName, event.input)) return;
 
 		if (!resolveApiKey()) {
@@ -587,61 +562,4 @@ export default function typesafeGuard(pi: ExtensionAPI): void {
 		if (ctx.hasUI) ctx.ui.setStatus("typesafe-guard", `工具执行失败（真实返回）· ${event.toolName}`);
 	});
 
-	pi.on("session_before_compact", async (event, ctx) => {
-		if (process.env.TYPESAFE_COMPACTION_DISABLE === "1") {
-			debugLog("compaction skipped: TYPESAFE_COMPACTION_DISABLE=1");
-			return;
-		}
-		if (event.signal.aborted) {
-			debugLog(`compaction skipped: signal aborted reason=${event.reason}`);
-			return { cancel: true };
-		}
-
-		const apiKey = resolveApiKey();
-		if (!apiKey) {
-			debugLog("compaction skipped: no TypeSafe API key");
-			notify(ctx, "Jev 压缩跳过：未找到 API Key，已使用原生压缩", "warning");
-			return;
-		}
-
-		// The compaction event can expose a context whose model getter is empty even
-		// though AgentSession has an active model. Keep the last observed window and
-		// use tokensBefore as a second fallback so a transiently empty context does
-		// not force the summary budget back to the old 16k limit.
-		const observedWindow = observedContextWindow(ctx);
-		if (observedWindow) lastKnownContextWindow = observedWindow;
-		const contextWindow = observedWindow ?? lastKnownContextWindow;
-		const config = defaultCompactionConfig(apiKey, contextWindow, event.preparation.tokensBefore);
-		debugLog(
-			`compaction start reason=${event.reason} context_window=${contextWindow ?? "unknown"} ` +
-			`summary_budget=${config.maxSummaryTokens} source=${config.summaryBudgetSource}`,
-		);
-		const outcome = await compactSession({
-			branchEntries: event.branchEntries,
-			firstKeptEntryId: event.preparation.firstKeptEntryId,
-			tokensBefore: event.preparation.tokensBefore,
-			fileOps: event.preparation.fileOps,
-			signal: event.signal,
-			config,
-		});
-
-		if ("fallback" in outcome) {
-			const message = `Jev 压缩回退：${outcome.fallback}`;
-			debugLog(`${message} context_window=${contextWindow ?? "unknown"} budget=${config.maxSummaryTokens}`);
-			notify(ctx, message, "warning");
-			return;
-		}
-
-		debugLog(outcome.report);
-		notify(ctx, outcome.report, "info");
-		return {
-			compaction: {
-				summary: outcome.summary,
-				firstKeptEntryId: outcome.firstKeptEntryId,
-				tokensBefore: outcome.tokensBefore,
-				usage: outcome.usage,
-				details: outcome.details,
-			},
-		};
-	});
 }
