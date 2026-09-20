@@ -1,0 +1,27 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check version files
+        run: test "$(node -p \"require('./package.json').version\")" = "$(cat VERSION)"
+      - name: Run checks
+        run: npm run check
+      - name: Check package contents
+        run: npm run pack:check
