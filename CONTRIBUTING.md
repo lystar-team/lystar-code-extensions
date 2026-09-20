@@ -17,7 +17,7 @@ npm ci
 - `typesafe-guard` 只负责工具预检、确认和工具失败状态。
 - `typesafe-compaction` 只负责会话压缩。
 - `typesafe-skill-planner` 只负责 Skill 选择和本轮响应指导。
-- `typesafe-anti-slop` 是选装的个人工作流 Extension，不进入默认加载链路。
+- `typesafe-anti-slop` 是选装的变更复核 Extension，不进入默认加载链路。
 - `extensions/typesafe-core.mjs` 是共享 API、凭据和配置事实源。
 - `rules/anti-ai-slop.rules.json` 只保存可选规则数据，不在检查器中复制规则。
 

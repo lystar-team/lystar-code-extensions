@@ -9,7 +9,7 @@
 | `typesafe-guard` | 是 | 工具调用前的 Jev 预检、高影响操作确认和工具失败状态提示 |
 | `typesafe-compaction` | 是 | 会话压缩和压缩失败回退 |
 | `typesafe-skill-planner` | 是 | 根据当前请求选择 Skill，确定回复形态和本轮响应指导 |
-| `typesafe-anti-slop` | 否 | 个人使用的 anti-ai-slop 变更复核；需要配合项目 Skill 和规则文件使用 |
+| `typesafe-anti-slop` | 否 | 变更复核；需要配合项目 Skill 和规则文件使用 |
 
 每个 Extension 都有独立入口和事件边界。Guard 不注册会话压缩，也不注册 anti-ai-slop；Compaction 不参与工具预检；anti-ai-slop 不会随默认包自动启用。
 
@@ -37,7 +37,7 @@ pi -e ./extensions/typesafe-skill-planner.ts
 
 ## 选装 anti-ai-slop
 
-anti-ai-slop 是个人工作流 Extension，不属于默认加载链路，也不进入公开包归档。它依赖项目中的 Skill、规则文件和业务取证流程，不应当被当成通用 Guard 能力。
+anti-ai-slop 是选装的变更复核 Extension，不属于默认加载链路，也不进入公开包归档。它配合项目中的 Skill、规则文件和业务取证流程使用，不应当被当成通用 Guard 能力。
 
 从当前仓库源码试用：
 
@@ -45,7 +45,7 @@ anti-ai-slop 是个人工作流 Extension，不属于默认加载链路，也不
 pi -e ./extensions/typesafe-anti-slop.ts
 ```
 
-规则文件位于 `rules/anti-ai-slop.rules.json`，可以通过 `TYPESAFE_ANTI_SLOP_RULES_PATH` 指向个人规则文件。后续若需要让其他用户独立安装，应把它整理为单独的 Pi Package 或独立仓库，不把个人规则并入默认组件包。
+规则文件位于 `rules/anti-ai-slop.rules.json`，可以通过 `TYPESAFE_ANTI_SLOP_RULES_PATH` 指定规则文件。该 Extension 与默认组件包分开维护。
 
 anti-ai-slop 不会修改规则、不自动阻断工具调用，也不会代替项目 Skill 的业务判断。
 
@@ -123,7 +123,7 @@ Planner 只追加本轮响应指导，不修改 Skill 内容，也不替代 Pi �
 
 anti-ai-slop 使用 `agent_settled` 复核最终变更，并注册 `/slop-check` 手动检查命令。它只在被显式加载时运行。
 
-规则只产生复核提示，不自动阻断工具调用。证据不足时保持待取证状态，不凭通用偏好修改代码。这个 Extension 面向 Yean 的个人 Skill 工作流，规则、业务取证和项目上下文需要由使用者自行维护。
+规则只产生复核提示，不自动阻断工具调用。证据不足时保持待取证状态，不凭通用偏好修改代码。该 Extension 需要项目 Skill、规则和业务上下文共同提供复核依据。
 
 ## 数据发送范围
 
