@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_MODEL,
+  DEFAULT_API_URL,
   typeSafeBaseUrl,
   typeSafeModel,
 } from '../extensions/typesafe-core.mjs';
 
 test('共享配置使用统一的模型和地址优先级', () => {
+  assert.equal(DEFAULT_API_URL, 'https://opencode.ai/inference');
+  assert.equal(DEFAULT_MODEL, 'jev-1.13-free');
   const previous = {
     base: process.env.TYPESAFE_BASE_URL,
     model: process.env.TYPESAFE_MODEL,

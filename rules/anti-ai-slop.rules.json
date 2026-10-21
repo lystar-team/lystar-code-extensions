@@ -1,12 +1,12 @@
 {
-  "version": 1,
+  "version": 2,
   "rules": [
     {
       "id": "unsupported-fallback",
+      "scenarios": ["通用"],
       "title": "没有业务依据的兜底",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的可执行业务代码",
       "requiredEvidence": [
         "需求或接口契约规定的默认值与失败行为",
@@ -26,14 +26,18 @@
       "good": {
         "context": "购物车契约规定：没有商品时总额为零。",
         "artifact": "return items.reduce((sum, item) => sum + item.amount, 0);"
-      }
+      },
+      "checkAt": [
+        "write",
+        "settle"
+      ]
     },
     {
       "id": "empty-description",
+      "scenarios": ["前端","文档文案"],
       "title": "没有任务价值的页面介绍",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的用户可见页面文案",
       "requiredEvidence": [
         "页面使用者与当前主任务",
@@ -44,7 +48,7 @@
         "必要输入限制",
         "动作后果或错误恢复说明",
         "无障碍描述",
-        "用户明确要求的介绍",
+        "用户明确要求保留该段介绍或功能罗列；泛泛的页面建设目标、增加介绍任务，不代表用户要求保留当前这段只复述按钮的文案",
         "文档正文或不可见元数据，不是页面介绍"
       ],
       "bad": {
@@ -55,21 +59,17 @@
         "context": "订单删除后不可恢复，需要操作提示。",
         "artifact": "<p>删除后无法恢复，请确认订单已作废。</p>"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "write",
+        "settle"
       ]
     },
     {
       "id": "implementation-leak",
+      "scenarios": ["前端","后端","文档文案"],
       "title": "业务页面展示底层实现",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的业务页面可见文案，不包括源码注释、技术文档和日志",
       "requiredEvidence": [
         "页面读者角色和工作任务",
@@ -90,21 +90,17 @@
         "context": "运维人员检查缓存连通性的诊断页面。",
         "artifact": "<p>Redis 连接失败，请检查服务地址。</p>"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "write",
+        "settle"
       ]
     },
     {
       "id": "decorative-english",
+      "scenarios": ["前端","文档文案"],
       "title": "装饰性英文子标题",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的中文页面可见标题及子标题",
       "requiredEvidence": [
         "界面语言和双语要求",
@@ -125,21 +121,17 @@
         "context": "开发者创建 API 密钥的中文设置页。",
         "artifact": "<h2>API 密钥</h2>"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "write",
+        "settle"
       ]
     },
     {
       "id": "reuse-public-component",
+      "scenarios": ["前端"],
       "title": "公共组件优先复用",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的页面组件、交互和样式实现",
       "requiredEvidence": [
         "项目内真实存在的候选公共组件及其接口",
@@ -160,21 +152,17 @@
         "context": "项目已有 UserPickerDialog，接口支持当前页面需要的搜索和多选。",
         "artifact": "<UserPickerDialog v-model:visible=\"visible\" :multiple=\"true\" @confirm=\"onUsersSelected\" />"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "write",
+        "settle"
       ]
     },
     {
       "id": "business-id-input",
+      "scenarios": ["前端"],
       "title": "不让用户直接输入业务 ID",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的用户可见业务页面中的对象选择与关联控件，不包括开发者、运维和接口调试工具",
       "requiredEvidence": [
         "目标用户和对象选择任务",
@@ -195,21 +183,17 @@
         "context": "客户数量较多时用 Dialog 表格选择；部门选项少且只展示部门名称时用下拉。",
         "artifact": "<button @click=\"openCustomerDialog\">选择客户</button><CustomerPickerDialog v-model:visible=\"visible\" @confirm=\"onCustomerSelected\" /><select v-model=\"form.departmentId\"><option v-for=\"item in departments\" :value=\"item.id\">{{ item.name }}</option></select>"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "write",
+        "settle"
       ]
     },
     {
       "id": "dictionary-label-required",
+      "scenarios": ["前端"],
       "title": "字典项必须展示翻译",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的用户可见字段、表格、标签、详情和筛选选项中来自字典的值",
       "requiredEvidence": [
         "字段属于字典项的项目证据",
@@ -229,21 +213,17 @@
         "context": "订单状态字典已在页面注册，业务人员只需要看到可读名称。",
         "artifact": "<DictLabel type=\"order_status\" :value=\"row.status\" />"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "write",
+        "settle"
       ]
     },
     {
       "id": "user-facing-plain-language",
+      "scenarios": ["前端","后端","文档文案"],
       "title": "用户文案使用可理解表达",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的面向普通业务用户、客户或公众的页面标题、字段、按钮、提示、空状态和错误信息",
       "requiredEvidence": [
         "目标用户及其完成当前任务所需的知识",
@@ -265,21 +245,17 @@
         "context": "普通客户查看订单，系统暂时无法读取订单数据。",
         "artifact": "<p>暂时无法加载订单，请稍后重试。</p>"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "write",
+        "settle"
       ]
     },
     {
       "id": "user-centered-information-architecture",
+      "scenarios": ["前端"],
       "title": "界面围绕用户任务组织",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或明显调整的用户可见页面结构、内容层级、操作入口和首屏承载方式",
       "requiredEvidence": [
         "目标用户、主任务、高频操作和完成路径",
@@ -301,21 +277,16 @@
         "context": "客服人员的主任务是查询和处理工单，客户详情是处理工单时的辅助信息。",
         "artifact": "<main><TicketFilters/><TicketTable/><CustomerDrawer v-model:open=\"customerOpen\"/></main>"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "settle"
       ]
     },
     {
       "id": "design-spec-compliance",
+      "scenarios": ["前端"],
       "title": "页面遵守项目 DESIGN.md",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "项目存在且适用于当前页面的 DESIGN.md 时，本次新增或修改的配色、排版、间距、圆角、组件形态、布局和交互视觉",
       "requiredEvidence": [
         "项目 DESIGN.md 的实际路径、适用范围和相关原文条款",
@@ -338,21 +309,16 @@
         "context": "DESIGN.md 规定后台使用蓝色主色 token、4/8 倍数间距和 6px 圆角，项目已有 PrimaryButton。",
         "artifact": "<PrimaryButton>提交</PrimaryButton>"
       },
-      "appliesTo": [
-        ".vue",
-        ".svelte",
-        ".html",
-        ".htm",
-        ".tsx",
-        ".jsx"
+      "checkAt": [
+        "settle"
       ]
     },
     {
       "id": "frontend-component-decomposition",
+      "scenarios": ["前端"],
       "title": "前端组件按职责拆分与复用",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或明显扩展的前端页面、组件、组合式函数、Hook 及其模板、脚本和样式责任",
       "requiredEvidence": [
         "目标文件的行数、主要区域、状态、数据请求、事件和交互生命周期",
@@ -374,14 +340,18 @@
       "good": {
         "context": "页面保留路由上下文和主任务编排；筛选、列表、编辑抽屉拥有独立责任，多页面共用的 CustomerPicker 进入公共组件目录。",
         "artifact": "<template><CustomerFilters/><CustomerTable/><CustomerEditorDrawer/><CustomerPicker/></template>"
-      }
+      },
+      "checkAt": [
+        "write",
+        "settle"
+      ]
     },
     {
       "id": "performance-conscious-implementation",
+      "scenarios": ["前端","后端"],
       "title": "实现避免可证明的性能浪费",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的前后端请求链路、数据库访问、批处理、循环、数据结构、渲染、计算、网络传输和资源加载",
       "requiredEvidence": [
         "真实或契约约定的数据规模、调用频率、响应目标及运行环境",
@@ -403,14 +373,17 @@
       "good": {
         "context": "订单接口单页最多返回 500 条记录，客户仓储支持按 ID 批量查询。",
         "artifact": "const customers = await customerRepository.findByIds([...new Set(orders.map(item => item.customerId))]); const byId = new Map(customers.map(item => [item.id, item]));"
-      }
+      },
+      "checkAt": [
+        "settle"
+      ]
     },
     {
       "id": "business-realistic-test-data",
+      "scenarios": ["通用"],
       "title": "自动测试数据使用真实业务语义",
       "enabled": true,
       "action": "review",
-      "threshold": 0.8,
       "scope": "本次新增或修改的自动测试、测试夹具、Factory、Mock、Seed、演示环境和验收数据中会写入数据库、接口响应或用户界面的编号、名称、备注及关联业务信息",
       "requiredEvidence": [
         "被测业务实体、字段含义、编号格式和数据校验规则",
@@ -432,7 +405,117 @@
       "good": {
         "context": "收费记录会进入验收页面，缴费单号使用 JF+日期+序号，客户使用虚构但自然的企业名称。",
         "artifact": "{ paymentNo: 'JF202609190021', customerName: '湘潭华远物业服务有限公司', feeItem: '2026年9月园区物业费', amount: 160.00 }"
+      },
+      "checkAt": [
+        "write",
+        "settle"
+      ]
+    },
+    {
+      "id": "business-dictionary-single-source",
+      "scenarios": ["前端","后端"],
+      "title": "业务字典使用权威事实源",
+      "enabled": true,
+      "action": "block",
+      "checkAt": [
+        "write",
+        "settle"
+      ],
+      "scope": "本次新增或修改的业务字段标签、筛选选项和状态映射；不包括前端视图切换、代码注释或规则正反例",
+      "violation": "页面或本地工具独立维护已有权威字典或后端枚举的业务code与标签对应关系，或复制子集而遗漏任务要求支持的合法业务值。仅补齐本地映射仍然保留重复事实源，不是完整修正。",
+      "requiredEvidence": [
+        "字段确属业务字典或枚举的源码或接口证据",
+        "权威来源及其合法选项",
+        "本次修改范围、页面用途与筛选要求"
+      ],
+      "exceptions": [
+        "前端Tabs、视图切换以及全部选项",
+        "从权威选项直接映射或按明确需求过滤，不新增独立code与label定义",
+        "按接口契约引用业务code作为请求条件，不是在定义字典",
+        "后端在正确责任位置定义权威枚举或输出其metadata",
+        "用户明确要求展示原始code的审计、运维场景",
+        "本次没有修改的既有映射不能阻断无关局部修改"
+      ],
+      "bad": {
+        "context": "后端通知枚举有SUCCESS、FAILED、SKIPPED，页面要求支持全部状态筛选。",
+        "artifact": "const options = [{label:'已发送',value:'SUCCESS'},{label:'未发送',value:'SKIPPED'}]"
+      },
+      "good": {
+        "context": "真实接口已提供由通知枚举全量生成的metadata.sendStatuses；包括value和label。",
+        "artifact": "const options = computed(() => metadata.value.sendStatuses)"
       }
+    },
+    {
+      "id": "documentation-final-state-only",
+      "scenarios": [
+        "文档文案"
+      ],
+      "title": "文档只写实际用法和最终状态",
+      "enabled": true,
+      "action": "review",
+      "scope": "本次新增或修改的 Skill 正文、使用说明、运维文档和交付文档",
+      "requiredEvidence": [
+        "用户当前要求、文档用途和目标读者",
+        "实际采用的调用路径、有效配置及最终产物",
+        "待检查段落与当前操作的直接关系"
+      ],
+      "violation": "在文档中罗列不做、未做、不需要做的事项，补写实际调用路径不会触发的替代方式或假想分支，或者记录试错、失败重试、临时探测和逐项验证过程。将这些内容改成肯定句但继续保留无关事项，同样违规。",
+      "exceptions": [
+        "检查规则的定义、违规说明及正反例"
+      ],
+      "bad": {
+        "context": "Agent 已通过本机挂载目录访问正式 Vault，Skill 用于指导日常检索和保存。",
+        "artifact": "不需要 SSH 上传下载，不使用 MacBook CLI，不导入旧记忆。验证时先遇到缓存问题，换参数后逐项测试通过，临时笔记已清理。"
+      },
+      "good": {
+        "context": "Agent 已通过本机挂载目录访问正式 Vault，Skill 用于指导日常检索和保存。",
+        "artifact": "知识库入口为 ~/obsidian/notes。使用 rg 检索笔记，使用 read、edit 和 write 读取及更新正文。"
+      },
+      "checkAt": [
+        "write",
+        "settle"
+      ]
+    },
+    {
+      "id": "direct-answer-without-padding",
+      "scenarios": [
+        "通用"
+      ],
+      "title": "回复直给结论，不绕弯、不添话",
+      "enabled": true,
+      "action": "review",
+      "scope": "面向用户的进度说明、问题答复和交付结论，包括写入文档的回复草稿；不改变事实准确性和用户确认的任务范围",
+      "requiredEvidence": [
+        "用户当前问题、要求的详略和已确认的任务范围",
+        "已知结果、验证依据及确实影响结论的条件",
+        "待检查的完整回复及其上下文"
+      ],
+      "violation": "面对明确问题不直接给结论，用范围切分、术语、自我解释或反复检讨绕开回答；在回答之后追加不影响判断的限制、背景、重复总结、承诺或建议；先说可以或已完成，再通过缩小用户确认的范围或追加条件推翻结论。用户明确要求简短、只说结论或不要废话时，仍输出上述内容。",
+      "exceptions": [
+        "确实改变结论的前提、限制或未验证项必须与结论一次说清，不能为了简短隐瞒问题",
+        "证据不足时直接说明无法判断及缺少的关键依据，不编造肯定或否定结论",
+        "用户明确要求原因、细节、比较或完整报告时，提供完成该请求所需的解释"
+      ],
+      "bad": {
+        "context": "用户要求直接判断本次功能能否上线；已确认的上线范围中仍有全额减免无法提交的问题。",
+        "artifact": "可以上线，但仅限有实收的收费关联减免。全额减免、零实收暂不支持，不在此次可上线范围内。"
+      },
+      "good": {
+        "context": "用户要求直接判断本次功能能否上线；已确认的上线范围中仍有全额减免无法提交的问题。",
+        "artifact": "不能上线，全额减免还无法提交。"
+      },
+      "checkAt": [
+        "write",
+        "settle"
+      ]
     }
-  ]
+  ],
+  "reviewer": {
+    "provider": "upstream",
+    "model": "gpt-6-luna",
+    "thinkingLevel": "high",
+    "timeoutMs": 60000,
+    "maxOutputTokens": 4096,
+    "maxAutomaticRounds": 0
+  }
 }

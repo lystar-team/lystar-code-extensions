@@ -2,8 +2,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export const DEFAULT_API_URL = 'https://api.typesafe.ai';
-export const DEFAULT_MODEL = 'jev-1.13.0';
+export const DEFAULT_API_URL = 'https://opencode.ai/inference';
+export const DEFAULT_MODEL = 'jev-1.13-free';
 export const DEFAULT_REQUEST_TIMEOUT_MS = 1800;
 
 // Jev 单次请求的输入预算。实测 30 个片段 / 93KB / 62649 输入 Token 返回 200，

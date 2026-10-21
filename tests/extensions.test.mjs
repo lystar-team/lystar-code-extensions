@@ -25,6 +25,7 @@ test('四个 Extension 都能独立加载并注册各自事件', async () => {
   const makePi = events => ({
     on(name, handler) { events.set(name, handler); },
     registerCommand(name) { events.set(`command:${name}`, true); },
+    registerTool(tool) { events.set(`tool:${tool.name}`, true); },
   });
   guard.default(makePi(guardEvents));
   compaction.default(makePi(compactionEvents));
@@ -35,6 +36,7 @@ test('四个 Extension 都能独立加载并注册各自事件', async () => {
   assert.equal(guardEvents.has('session_before_compact'), false);
   assert.equal(typeof compactionEvents.get('session_before_compact'), 'function');
   assert.equal(typeof plannerEvents.get('before_agent_start'), 'function');
-  assert.equal(typeof antiSlopEvents.get('agent_settled'), 'function');
+  assert.equal(antiSlopEvents.has('agent_settled'), false);
+  assert.equal(antiSlopEvents.get('tool:slop_check'), true);
   assert.equal(antiSlopEvents.get('command:slop-check'), true);
 });

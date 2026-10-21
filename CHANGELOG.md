@@ -2,6 +2,14 @@
 
 ## 未发布
 
+- 修正 anti-ai-slop 将 Windows 当前盘符下 `/tmp`、`/var/tmp` 误当系统临时目录的判断。
+- 测试动态导入改为 file URL，Windows 同步隔离 USERPROFILE，目录链接使用 junction；补充中文和空格路径、CRLF、PowerShell 的回归测试。
+- CI 增加 Windows runner，测试通配符和版本核对改为跨 Shell 写法；运行要求与现有 Pi 开发依赖对齐为 Node.js 22.19 或更高版本，CI 和发布流程使用 Node.js 24。
+
+- 合入在用的 anti-ai-slop：代理原生文件工具，按会话和 inputId 记录本轮实际行段，显式调用 `slop_check`；支持大段与长行分片、依赖证据缓存、并发冲突恢复和最多两轮逐项修正确认。
+- anti-ai-slop 改用规则文件 `reviewer` 指定的语义审查模型，通过 Pi 模型注册表解析服务和认证；同步 version 2 规则及现用回归测试，测试规则和日志使用独立临时用户目录。
+- Jev 共享客户端默认地址改为 `https://opencode.ai/inference`，默认模型改为 `jev-1.13-free`；Compaction 保留共享核心引用和现有压缩逻辑。
+
 - 修复重复 Compaction 丢失上一轮保留边界：原来按最近一条 compaction 后的条目自行切分，已有大摘要且新增内容未满 `keepRecentTokens` 时会错误地让 Jev 返回“没有可压缩内容”；现在直接使用 Pi preparation 的 `messagesToSummarize`、split-turn 前缀和 `firstKeptEntryId`。用 LYStar Code 对「原系统园区及客户合同缴费数据迁移方案」真实会话验证：`118700 → 25059 Token`、`fromHook=true`、1 个请求、615ms。
 - 压缩无事可做时不再报英文回退：整段历史都在 Pi 保留窗口内（`keepRecentTokens` 默认 20,000）时会弹 `Jev 压缩回退：nothing to compact before kept window`，现在改为中文说明「整段历史都在保留窗口内，没有可压缩的内容」并按 info 提示；用户取消不再提示；其余回退原因（分支状态异常、无候选、Jev 请求失败）一并中文化。实测刚压缩过的会话（压缩后新增 33 条、36 KB）不再出现英文告警。
 - 摘要预算改为「窗口份额 + 绝对上限」：`clamp(0.4 × 上下文窗口, 16000, 120000)`，`tokensBefore` 兜底路径同规则。修复 1M 窗口模型产生 189,844 Token 常驻摘要的问题（同一会话在 272,000 与 1,000,000 窗口下的摘要体积差 10 倍）。

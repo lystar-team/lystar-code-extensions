@@ -6,9 +6,8 @@ declare module '*.mjs' {
   export function resolveApiKey(): string | undefined;
   export function typeSafeBaseUrl(): string;
   export function typeSafeModel(): string;
-  export function registerAntiSlop(
-    pi: unknown,
-    ask: unknown,
-    options?: Record<string, unknown>,
-  ): void;
+  export const RULES_PATH: string;
+  export function createReviewController(pi: unknown, options?: Record<string, unknown>): any;
+  export function formatAuditOutput(results: any): any;
+  export function decodeSource(bytes: Uint8Array): string | undefined;
 }

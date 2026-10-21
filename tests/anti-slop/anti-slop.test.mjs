@@ -1,0 +1,55 @@
+import { implementationRoot } from './setup.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const root=implementationRoot;
+const core=await import(root+'/anti-slop.mjs');const client=await import(root+'/review-client.mjs');
+const base=core.loadConfig(core.RULES_PATH).config;
+const allow=()=>({verdict:'allow',findings:[],neededEvidence:[],patches:[]});
+const finding=()=>({ruleId:'business-dictionary-single-source',location:'fixture.vue:1',problem:'固定协议测试问题',suggestion:'固定协议测试修正',evidenceRefs:['E1']});
+function fixture(){const cwd=mkdtempSync(join(tmpdir(),'luna-review-unit-'));const rulesPath=join(cwd,'rules.json');writeFileSync(rulesPath,JSON.stringify(base));return {cwd,rulesPath,ctx:{cwd,sessionManager:{getBranch:()=>[{type:'message',message:{role:'user',content:'验证审查机制'}}]}}};}
+function payload(){return {...core.candidateInput({path:'fixture.vue',before:'',after:'<p>候选</p>'},'candidate-1'),rules:base.rules,evidence:[{id:'E1',path:'测试协议',text:'仅用于机制测试'}]};}
+function checkedAsk(value){return async()=>({review:value(),metrics:{simulation:true,totalMs:1,inputTokens:1,outputTokens:1}});}
+
+test('规则采用唯一version2结构且全部ID唯一',()=>{const valid=core.validateConfig(base);assert.equal(valid.version,2);assert.equal(new Set(valid.rules.map(r=>r.id)).size,valid.rules.length);});
+for(const [title,mutate] of [
+ ['重复ID',c=>c.rules.push(c.rules[0])],['无效action',c=>c.rules[0].action='silent'],['缺少例外数组',c=>delete c.rules[0].exceptions],['无效超时',c=>c.reviewer.timeoutMs=0],['无效检查边界',c=>c.rules[0].checkAt=['unknown']]
+])test(`规则拒绝${title}`,()=>{const c=structuredClone(base);mutate(c);assert.throws(()=>core.validateConfig(c))});
+test('纯删除保留删除事实并且不是零修改',()=>{const d=core.candidateInput({path:'fixture.vue',before:'a\nremove\nb',after:'a\nb'},'v');assert.equal(d.change.before,'remove');assert.equal(d.change.after,'');assert.equal(d.change.ranges.length,1)});
+test('两个相隔修改都进入差异范围',()=>{const a=Array.from({length:80},(_,i)=>'line-'+i);const b=[...a];b[2]='first';b[70]='last';assert.equal(core.diffHunks(a.join('\n'),b.join('\n')).hunks.length,2)});
+test('上下文超限不能声称完整覆盖',()=>{const input=core.candidateInput({path:'fixture.vue',before:'',after:'x'.repeat(30000)},'v');assert.equal(input.coverageComplete,false)});
+for(const [title,value] of [
+ ['allow附带问题',()=>({...allow(),findings:[finding()]})],
+ ['无问题的reject',()=>({...allow(),verdict:'reject'})],
+ ['缺材料的needs_evidence',()=>({...allow(),verdict:'needs_evidence'})],
+ ['未知规则',()=>({...allow(),verdict:'reject',findings:[{...finding(),ruleId:'missing'}]})],
+ ['未知证据',()=>({...allow(),verdict:'reject',findings:[{...finding(),evidenceRefs:['missing']}]})],
+ ['补丁过期版本',()=>({...allow(),verdict:'reject',findings:[finding()],patches:[{candidateVersion:'old',ruleId:finding().ruleId,startLine:1,endLine:1,newText:''}]})],
+ ['补丁越界',()=>({...allow(),verdict:'reject',findings:[finding()],patches:[{candidateVersion:'candidate-1',ruleId:finding().ruleId,startLine:3,endLine:3,newText:''}]})],
+ ['补丁重叠',()=>({...allow(),verdict:'reject',findings:[finding()],patches:[1,1].map(()=>({candidateVersion:'candidate-1',ruleId:finding().ruleId,startLine:1,endLine:1,newText:''}))})],
+ ['未知字段',()=>({...allow(),probability:0.8})]
+])test(`审查结构拒绝${title}`,()=>assert.throws(()=>core.validateReview(value(),payload())));
+test('同材料同规则复用检查；规则内容改变必须再次调用',async()=>{const f=fixture();let calls=0;const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:async()=>{calls++;return {review:allow(),metrics:{simulation:true}}}});const change={path:join(f.cwd,'fixture.vue'),before:'',after:'<button>发送</button>'};assert.equal((await c.review(change,f.ctx)).status,'checked');assert.equal((await c.review(change,f.ctx)).cacheReused,true);assert.equal(calls,1);const updated=structuredClone(base);updated.rules[0].violation+='新要求';writeFileSync(f.rulesPath,JSON.stringify(updated));await c.review(change,f.ctx);assert.equal(calls,2)});
+test('旧源码证据变化使缓存失效并不继续引用旧材料',async()=>{const f=fixture(),path=join(f.cwd,'Enum.java');writeFileSync(path,'enum A {}');const observed=[];const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:async p=>{observed.push(p);return {review:allow(),metrics:{simulation:true}}}});c.addEvidence(path,'enum A {}',{revision:createHash('sha256').update('enum A {}').digest('hex')});const change={path:join(f.cwd,'fixture.vue'),before:'',after:'<button>发送</button>'};await c.review(change,f.ctx);writeFileSync(path,'enum A {B}');await c.review(change,f.ctx);assert.equal(observed.length,2);assert.equal(observed[1].evidence.some(e=>e.path===path),false);assert.deepEqual(observed[1].staleEvidence,[path])});
+test('API失败和无效结构均标未检查，保持失败放行边界',async()=>{for(const ask of [async()=>{throw Error('超时模拟')},checkedAsk(()=>({...allow(),verdict:'reject'}))]){const f=fixture(),c=core.createReviewController({}, {rulesPath:f.rulesPath,ask});const r=await c.review({path:join(f.cwd,'fixture.vue'),before:'',after:'<p/>'},f.ctx);assert.equal(r.status,'unchecked');assert.equal(r.blocked,false)}});
+test('已证明的block拒绝，而review反馈不拒绝',async()=>{for(const action of ['block','review']){const f=fixture();const cfg=structuredClone(base);cfg.rules.find(r=>r.id===finding().ruleId).action=action;writeFileSync(f.rulesPath,JSON.stringify(cfg));const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:checkedAsk(()=>({...allow(),verdict:'reject',findings:[finding()]}))});const r=await c.review({path:join(f.cwd,'fixture.vue'),before:'',after:'<p/>'},f.ctx,{extraEvidence:[{id:'E1',path:'协议夹具',text:'模拟审查响应'}]});assert.equal(r.blocked,action==='block')}});
+test('规则文件维护只做结构校验，不把bad示例当产物',async()=>{const f=fixture();let calls=0;const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:async()=>{calls++;return {review:allow()}}});assert.equal((await c.beforeWrite(f.rulesPath,'',JSON.stringify(base),f.ctx)).maintenance,true);assert.equal(calls,0);await assert.rejects(()=>c.beforeWrite(f.rulesPath,'','{}',f.ctx))});
+test('指定不存在差异基线的文件不返回零差异通过',async()=>{const f=fixture(),path=join(f.cwd,'fixture.vue');writeFileSync(path,'<p/>');const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:checkedAsk(allow)});const r=await c.finalAudit(f.ctx,[path]);assert.equal(r[0].status,'unchecked')});
+test('多仓库根无Git也捕获三份基线，保留已有未提交修改',async()=>{const f=fixture();for(const name of ['api','admin','uniapp']){const p=join(f.cwd,name);mkdirSync(p);execFileSync('git',['init','-q',p]);writeFileSync(join(p,'sample.js'),'original\n');execFileSync('git',['-C',p,'add','.']);execFileSync('git',['-C',p,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture']);}writeFileSync(join(f.cwd,'admin','sample.js'),'existing\n');const b=await core.captureWorkspaceBaseline(f.cwd);assert.equal(b.snapshots.length,3);writeFileSync(join(f.cwd,'admin','sample.js'),'existing\nnew\n');const changes=await core.collectFinalChanges(b,new Map());assert.equal(changes.length,1);assert.equal(changes[0].before,'existing\n');assert.equal(changes[0].ownership,'unattributed')});
+function streamBody(text,{status='completed',model='gpt-6-luna',effort='high'}={}){return [`data: ${JSON.stringify({type:'response.output_text.delta',delta:text})}\n\n`,`data: ${JSON.stringify({type:'response.'+status,response:{status,model,reasoning:{effort},usage:{input_tokens:100,input_tokens_details:{cached_tokens:0},output_tokens:40,output_tokens_details:{reasoning_tokens:30}}}})}\n\n`].join('');}
+const clientCtx={modelRegistry:{getModelOfType:async()=>({id:'gpt-6-luna',api:'openai-responses',baseUrl:'http://fixture.invalid/v1'}),getProviderAuth:async()=>({auth:{apiKey:'fixture-only'}})}};
+test('SSE真实解析协议：high回显和思考不重复加算',async t=>{let body;t.mock.method(globalThis,'fetch',async(_url,opts)=>{body=JSON.parse(opts.body);return new Response(streamBody(JSON.stringify(allow())))});const r=await client.requestReview(payload(),base.reviewer,clientCtx);assert.equal(body.reasoning.effort,'high');assert.equal(body.text.format.strict,true);assert.equal(r.metrics.outputTokens,40);assert.equal(r.metrics.reasoningTokens,30);assert.equal(r.metrics.cachedInputTokens,0)});
+for(const [title,options] of [['截断',{status:'incomplete'}],['错模型',{model:'other'}],['错思考强度',{effort:'medium'}]])test(`SSE${title}不接受为完整审查`,async t=>{t.mock.method(globalThis,'fetch',async()=>new Response(streamBody(JSON.stringify(allow()),options)));await assert.rejects(()=>client.requestReview(payload(),base.reviewer,clientCtx))});
+test('HTTP错误没有当作通过',async t=>{t.mock.method(globalThis,'fetch',async()=>new Response('bad',{status:400}));await assert.rejects(()=>client.requestReview(payload(),base.reviewer,clientCtx),/HTTP 400/)});
+
+// 这些测试只验证协议和控制流程，不作为模型判断成绩。
+test('重复空行中的单行修改不会膨胀成全文件重写',()=>{const before=['a','','','','target','','','z'].join('\n');const after=before.replace('target','changed');const d=core.diffHunks(before,after);assert.equal(d.hunks.length,1);assert.equal(d.hunks[0].before,'target');assert.equal(d.hunks[0].changedStartLine,5)});
+test('超长候选不发送不完整语义请求',async()=>{const f=fixture();let calls=0;const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:async()=>{calls++;return {review:allow()}}});const r=await c.review({path:join(f.cwd,'fixture.vue'),before:'',after:'x'.repeat(30000)},f.ctx);assert.equal(r.status,'unchecked');assert.equal(calls,0)});
+test('已写入的超大文本按完整分片完成审查',async()=>{const f=fixture(),path=join(f.cwd,'large.vue'),seen=[];const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:async p=>{seen.push(p);return {review:allow()};}});const text='x'.repeat(210000);writeFileSync(path,text);c.written(path,'',text,{status:'pending'});const r=await c.finalAudit(f.ctx,[path]);assert.ok(r.length>1);assert.ok(r.every(p=>p.status==='checked'&&p.review.verdict==='allow'));assert.equal(seen.map(p=>p.change.after).join(''),text);});
+test('完整API返回格式无效时仍保留真实usage',async()=>{const f=fixture();const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:async()=>({review:{...allow(),verdict:'reject'},metrics:{inputTokens:100,outputTokens:20,totalMs:7}})});const r=await c.review({path:join(f.cwd,'fixture.vue'),before:'',after:'<p/>'},f.ctx);assert.equal(r.status,'unchecked');assert.equal(r.inputTokens,100);assert.equal(r.outputTokens,20)});
+test('差异归属字段不制造重复API请求',async()=>{const f=fixture();let calls=0;const c=core.createReviewController({}, {rulesPath:f.rulesPath,ask:async()=>{calls++;return {review:allow()}}});const change={path:join(f.cwd,'fixture.vue'),before:'',after:'<p/>'};await c.review(change,f.ctx);const r=await c.review({...change,source:'tool',ownership:'own'},f.ctx);assert.equal(r.cacheReused,true);assert.equal(calls,1)});
+test('金额补丁保留成功结果并让失败真实抛出',async()=>{const text='async function loadTotal(){return await api.total()}';const load=api=>new Function('api',text+';return loadTotal')(api);assert.equal(await load({total:async()=>123.45})(),123.45);await assert.rejects(()=>load({total:async()=>{throw Error('读取失败')}})(),/读取失败/)});
